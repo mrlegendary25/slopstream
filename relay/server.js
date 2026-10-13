@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// claude-link relay
+// slopstream relay
 // - authenticates users (token per user)
 // - pairs one chat <-> one chat (a "link"), approved by BOTH humans
 // - delivers messages ONLY if the peer's linked session is connected right now (no queueing)
@@ -109,7 +109,7 @@ function handleHello(ws, m) {
   const chat = String(m.chat);
   if (!NAME_RE.test(chat)) { send(ws, { t: 'error', code: 'bad_chat', message: 'invalid chat label' }); return ws.close(4004, 'bad chat'); }
   const link = findLink(user, chat);
-  if (!link) { send(ws, { t: 'error', code: 'not_linked', message: `chat "${chat}" has no link; pair it with the claude-link CLI` }); return ws.close(4005, 'not linked'); }
+  if (!link) { send(ws, { t: 'error', code: 'not_linked', message: `chat "${chat}" has no link; pair it with the slopstream CLI` }); return ws.close(4005, 'not linked'); }
   const k = key(user, chat);
   if (online.has(k)) { send(ws, { t: 'error', code: 'duplicate', message: 'this chat is already connected elsewhere' }); return ws.close(4006, 'duplicate'); }
   ws.mode = 'session'; ws.chat = chat; ws.linkId = link.id;
@@ -208,4 +208,4 @@ setInterval(() => {
   for (const [code, p] of pending) if (p.exp < Date.now()) pending.delete(code);
 }, 15000).unref();
 
-wss.on('listening', () => console.log(`claude-link relay listening on ws://${HOST}:${PORT}  data=${DATA}`));
+wss.on('listening', () => console.log(`slopstream relay listening on ws://${HOST}:${PORT}  data=${DATA}`));

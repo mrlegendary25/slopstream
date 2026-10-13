@@ -1,5 +1,8 @@
 # Slopstream
 
+> ## Seamless slop grenades.
+> *Safety pin included.* (The pin is your approve button.)
+
 **Stop being the clipboard.** Slopstream links one Claude Code chat of yours to one Claude Code chat of a friend's, so the two agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
 
 - A message arrives as a **new prompt in the chat that is already open**. It never starts a new chat.
@@ -9,8 +12,6 @@
 
 What it is and why it exists: see [product.md](./product.md). This file is the how-to.
 
-> **Naming note.** The product is Slopstream. In this first version the code still carries its working name, `claude-link`: the command is `claude-link`, the MCP server is called `claude-link`, and settings live in `~/.claude-link`. This guide uses the names that exist today so every command can be copy-pasted. A rename pass is planned.
->
 > **Status.** V1. The relay, pairing, delivery rules and security checks are covered by automated end-to-end tests (`npm test`). It has **not yet been verified inside a live Claude Code session**. Part 10 (rehearsal on your own Mac) is how you check that before involving your friend.
 
 ---
@@ -59,7 +60,7 @@ What it is and why it exists: see [product.md](./product.md). This file is the h
 | **Tailscale** | A private network between your Macs, so the relay never has to be on the open internet | both of you |
 | **Relay** | A tiny server that routes messages between linked chats | **one person**, the "relay host" |
 | **Bridge** | A small program that Claude Code starts inside each linked chat. It receives messages and gives Claude a `send_message` tool | both (Claude Code starts it for you) |
-| **`claude-link` CLI** | Commands for setup, pairing and unlinking. **Claude itself cannot run these**, on purpose | both |
+| **`slopstream` CLI** | Commands for setup, pairing and unlinking. **Claude itself cannot run these**, on purpose | both |
 
 In this guide **Himnish is the relay host** and **Aarush is the friend**. Swap names as needed. Things only the relay host does are marked **[relay host]**. Everything else is for both.
 
@@ -134,21 +135,21 @@ npm link
 ```
 
 - `npm install` downloads the three libraries it needs.
-- `npm link` gives you the `claude-link` command everywhere on your Mac.
+- `npm link` gives you the `slopstream` command everywhere on your Mac.
 
 **Check it worked:**
 
 ```bash
-claude-link
+slopstream
 ```
 
 You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`).
 
-If you get `command not found: claude-link`:
+If you get `command not found: slopstream`:
 - If you use **nvm** and switched Node versions, run `npm link` again under the Node version you're using now.
 - If `npm link` gives a permissions error, don't use `sudo`. Instead add this line to `~/.zshrc` (with your real path), then run `source ~/.zshrc`:
   ```bash
-  alias claude-link='node /full/path/to/slopstream/bridge/cli.js'
+  alias slopstream='node /full/path/to/slopstream/bridge/cli.js'
   ```
 
 *(Optional)* run the self-test to confirm everything on your Mac works:
@@ -157,7 +158,7 @@ If you get `command not found: claude-link`:
 npm test
 ```
 
-It should end with `24 passed, 0 failed`. A line saying `error: auth: bad user or token` in the middle is expected; the test checks that a wrong password is rejected.
+It should end with `30 passed, 0 failed`. A line saying `error: auth: bad user or token` in the middle is expected; the test checks that a wrong password is rejected.
 
 ## 6. Step 4: Start the relay (the relay host only)
 
@@ -206,7 +207,7 @@ HOST=100.101.102.103 PORT=8787 DATA_DIR="$HOME/.slopstream-relay" caffeinate -i 
 Expected output:
 
 ```
-claude-link relay listening on ws://100.101.102.103:8787  data=/Users/mrlegendary/.slopstream-relay
+slopstream relay listening on ws://100.101.102.103:8787  data=/Users/mrlegendary/.slopstream-relay
 ```
 
 What each part does:
@@ -239,22 +240,22 @@ Then `~/start-slopstream-relay.sh` starts the relay. (Edit the IP to yours.)
 Each of you, once per Mac. You need the relay's address, your username and your token.
 
 ```bash
-claude-link setup ws://100.101.102.103:8787 himnish <your-token>
+slopstream setup ws://100.101.102.103:8787 himnish <your-token>
 ```
 
 For Aarush:
 
 ```bash
-claude-link setup ws://100.101.102.103:8787 aarush <aarush-token>
+slopstream setup ws://100.101.102.103:8787 aarush <aarush-token>
 ```
 
 Use the **relay host's** Tailscale address as seen from *your own* console (see 4b). Expected output:
 
 ```
-OK. Authenticated as "aarush". Saved to /Users/aarush/.claude-link/config.json
+OK. Authenticated as "aarush". Saved to /Users/aarush/.slopstream/config.json
 ```
 
-That file (`~/.claude-link/config.json`) holds your relay address, username and token, readable only by you. Setup verifies your login before saving, so if it prints OK you're connected.
+That file (`~/.slopstream/config.json`) holds your relay address, username and token, readable only by you. Setup verifies your login before saving, so if it prints OK you're connected.
 
 ## 8. Step 6: Pair one chat with one chat
 
@@ -267,12 +268,12 @@ A **link** joins one of your chats to one of your friend's chats. You identify a
 **Himnish** (creates the code):
 
 ```bash
-claude-link pair-create projX
+slopstream pair-create projX
 ```
 
 ```
 Pairing code for chat "projX":  1A2B3C4D   (valid 10 min)
-Give it to your friend. They run:  claude-link pair-accept 1A2B3C4D <their-chat-label>
+Give it to your friend. They run:  slopstream pair-accept 1A2B3C4D <their-chat-label>
 Waiting...
 ```
 
@@ -281,7 +282,7 @@ Send Aarush the 8-character code. It expires in 10 minutes.
 **Aarush** (accepts it, using his own label):
 
 ```bash
-claude-link pair-accept 1A2B3C4D projX
+slopstream pair-accept 1A2B3C4D projX
 ```
 
 ```
@@ -295,13 +296,13 @@ aarush wants to link their chat "projX" to your chat "projX".
 Approve? [y/N]
 ```
 
-Type `y` and press Enter. Both terminals print `Linked: projX <-> aarush/projX`.
+Type `y` and press Enter. Both terminals print a `Linked: ...` line (Himnish sees `Linked: projX <-> aarush/projX`; Aarush sees it from his side, `Linked: projX <-> himnish/projX`).
 
 Useful commands:
 
 ```bash
-claude-link links           # list your links
-claude-link unlink projX    # cut a link instantly, for both sides
+slopstream links           # list your links
+slopstream unlink projX    # cut a link instantly, for both sides
 ```
 
 ## 9. Step 7: Turn it on in a project and use it
@@ -312,7 +313,7 @@ Go to the project whose Claude Code chat you linked, and run init **with the sam
 
 ```bash
 cd ~/path/to/projectX
-claude-link init projX
+slopstream init projX
 ```
 
 This does two things, both safe to run again:
@@ -326,23 +327,23 @@ Only folders where you ran `init` get the bridge. Every other Claude Code sessio
 Always start it with this flag:
 
 ```bash
-claude --dangerously-load-development-channels server:claude-link
+claude --dangerously-load-development-channels server:slopstream
 ```
 
 Tip: save a shortcut. Add to `~/.zshrc`, then `source ~/.zshrc`:
 
 ```bash
-alias slopclaude='claude --dangerously-load-development-channels server:claude-link'
+alias slopclaude='claude --dangerously-load-development-channels server:slopstream'
 ```
 
 Why that long flag: channels are a **research preview**, and custom channels aren't on Anthropic's approved list yet, so Claude Code requires this flag to load one. It only works in an **interactive** session (not `claude -p`).
 
 On first start you'll see:
 1. A full-screen **development channels warning**. Choose **"I am using this for local development"**.
-2. **"New MCP server found in this project: claude-link"**. Choose **"Use this MCP server"**.
+2. **"New MCP server found in this project: slopstream"**. Choose **"Use this MCP server"**.
 
 Then a faint line under the banner confirms the channel is registered:
-`Channels (experimental) messages from server:claude-link inject directly in this session ...`
+`Channels (experimental) messages from server:slopstream inject directly in this session ...`
 
 ### 9c. Check the link
 
@@ -360,7 +361,7 @@ In the chat, type: **"Use link_status."** Claude should show something like:
 
 **Sending.** Just ask in plain language: *"Ask Aarush's agent whether the migration branch is merged."* Claude calls `send_message`. Claude Code shows a **permission prompt**. Read the text, then choose **"Yes" (this time only)**. **Never choose "always allow" for `send_message`.** That prompt is your outgoing approval.
 
-**Receiving.** A message from Aarush's agent appears in your open chat as a new prompt, shown as a line starting with `←` and `claude-link`, and marked `[UNTRUSTED message from aarush's agent ...]`. Claude then **shows it to you and waits**. You decide: ignore it, reply, or do something with it. If you want to reply, tell Claude what to say; it will use `send_message` and you approve again.
+**Receiving.** A message from Aarush's agent appears in your open chat as a new prompt, shown as a line starting with `←` and `slopstream`, and marked `[UNTRUSTED message from aarush's agent ...]`. Claude then **shows it to you and waits**. You decide: ignore it, reply, or do something with it. If you want to reply, tell Claude what to say; it will use `send_message` and you approve again.
 
 **Rules of the road (also in your `CLAUDE.md`):** short, purposeful text messages; no files; no secrets; no long agent-to-agent ping-pong without you in the loop.
 
@@ -382,20 +383,20 @@ DATA_DIR="$HOME/.slopstream-rehearsal" node relay/admin.js add-user rehearsal-b
 DATA_DIR="$HOME/.slopstream-rehearsal" node relay/server.js     # leave running
 ```
 
-**Terminal 2: set up and pair.** Replace the tokens. Separate `CLAUDE_LINK_HOME` folders keep this from touching your real setup:
+**Terminal 2: set up and pair.** Replace the tokens. Separate `SLOPSTREAM_HOME` folders keep this from touching your real setup:
 
 ```bash
-CLAUDE_LINK_HOME="$HOME/.claude-link-rehearsal-a" claude-link setup ws://127.0.0.1:8787 rehearsal-a <token-a>
-CLAUDE_LINK_HOME="$HOME/.claude-link-rehearsal-b" claude-link setup ws://127.0.0.1:8787 rehearsal-b <token-b>
+SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream setup ws://127.0.0.1:8787 rehearsal-a <token-a>
+SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-b" slopstream setup ws://127.0.0.1:8787 rehearsal-b <token-b>
 
-CLAUDE_LINK_HOME="$HOME/.claude-link-rehearsal-a" claude-link pair-create demo
+SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream pair-create demo
 # prints a code, then waits
 ```
 
 **Terminal 3:**
 
 ```bash
-CLAUDE_LINK_HOME="$HOME/.claude-link-rehearsal-b" claude-link pair-accept <CODE> demo
+SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-b" slopstream pair-accept <CODE> demo
 ```
 
 Back in Terminal 2 press `y`.
@@ -404,26 +405,26 @@ Back in Terminal 2 press `y`.
 
 ```bash
 mkdir -p ~/slopstream-rehearsal/a ~/slopstream-rehearsal/b
-cd ~/slopstream-rehearsal/a && claude-link init demo
-cd ~/slopstream-rehearsal/b && claude-link init demo
+cd ~/slopstream-rehearsal/a && slopstream init demo
+cd ~/slopstream-rehearsal/b && slopstream init demo
 ```
 
 **Tell each project which config folder to use.** Open `~/slopstream-rehearsal/a/.mcp.json` and add a line inside `env`:
 
 ```json
 "env": {
-  "CLAUDE_LINK_CHAT": "demo",
-  "CLAUDE_LINK_HOME": "/Users/mrlegendary/.claude-link-rehearsal-a"
+  "SLOPSTREAM_CHAT": "demo",
+  "SLOPSTREAM_HOME": "/Users/mrlegendary/.slopstream-rehearsal-a"
 }
 ```
 
-Do the same in `b/.mcp.json` with `.claude-link-rehearsal-b`. (Use your real home path.)
+Do the same in `b/.mcp.json` with `.slopstream-rehearsal-b`. (Use your real home path.)
 
 **Run both sides** in two new terminals:
 
 ```bash
-cd ~/slopstream-rehearsal/a && claude --dangerously-load-development-channels server:claude-link
-cd ~/slopstream-rehearsal/b && claude --dangerously-load-development-channels server:claude-link
+cd ~/slopstream-rehearsal/a && claude --dangerously-load-development-channels server:slopstream
+cd ~/slopstream-rehearsal/b && claude --dangerously-load-development-channels server:slopstream
 ```
 
 In **a**, ask: *"Send the linked agent this message: hello from A."* Approve the prompt. In **b**, the message should appear and Claude should show it to you and wait.
@@ -431,8 +432,8 @@ In **a**, ask: *"Send the linked agent this message: hello from A."* Approve the
 If it works, you've verified the whole path. Clean up with:
 
 ```bash
-CLAUDE_LINK_HOME="$HOME/.claude-link-rehearsal-a" claude-link unlink demo
-rm -rf ~/slopstream-rehearsal ~/.claude-link-rehearsal-a ~/.claude-link-rehearsal-b ~/.slopstream-rehearsal
+SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream unlink demo
+rm -rf ~/slopstream-rehearsal ~/.slopstream-rehearsal-a ~/.slopstream-rehearsal-b ~/.slopstream-rehearsal
 ```
 
 ## 11. Every day after setup
@@ -444,7 +445,7 @@ rm -rf ~/slopstream-rehearsal ~/.claude-link-rehearsal-a ~/.claude-link-rehearsa
 **Friend:**
 1. Make sure Tailscale is connected.
 
-**Both:** open the linked project and start `slopclaude` (or the full `claude --dangerously-load-development-channels server:claude-link`). Ask Claude *"is the peer online?"* and you're set.
+**Both:** open the linked project and start `slopclaude` (or the full `claude --dangerously-load-development-channels server:slopstream`). Ask Claude *"is the peer online?"* and you're set.
 
 Setup, pairing and `init` are one-time. The relay host's Mac has to be awake and running the relay whenever you want to talk.
 
@@ -454,16 +455,16 @@ Setup, pairing and `init` are one-time. The relay host's Mac has to be awake and
 
 | Command | What it does |
 |---|---|
-| `claude-link setup <relay-url> <user> <token>` | Save your login (once per Mac) |
-| `claude-link pair-create <chat> [--yes]` | Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
-| `claude-link pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
-| `claude-link links` | List your links |
-| `claude-link unlink <chat>` | Cut a link immediately, on both sides |
-| `claude-link init <chat>` | In a project folder: write `.mcp.json` and the safety rules |
+| `slopstream setup <relay-url> <user> <token>` | Save your login (once per Mac) |
+| `slopstream pair-create <chat> [--yes]` | Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
+| `slopstream pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
+| `slopstream links` | List your links |
+| `slopstream unlink <chat>` | Cut a link immediately, on both sides |
+| `slopstream init <chat>` | In a project folder: write `.mcp.json` and the safety rules |
 | `node relay/admin.js add-user <name>` | **[relay host]** create a user, print the token once |
 | `node relay/admin.js list-users` / `remove-user <name>` | **[relay host]** manage users |
 | `node relay/server.js` | **[relay host]** run the relay |
-| `npm test` | Run the 24 end-to-end checks |
+| `npm test` | Run the 30 end-to-end checks |
 
 ### What Claude can do in a linked chat
 
@@ -486,20 +487,20 @@ Bridge and CLI:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CLAUDE_LINK_HOME` | `~/.claude-link` | Where your login and local log live |
-| `CLAUDE_LINK_CHAT` | the project's folder name | Which chat label this session is. `init` sets it for you |
+| `SLOPSTREAM_HOME` | `~/.slopstream` | Where your login and local log live |
+| `SLOPSTREAM_CHAT` | the project's folder name | Which chat label this session is. `init` sets it for you |
 
 ### Where things are stored
 
 | Path | What | Sensitive? |
 |---|---|---|
-| `~/.claude-link/config.json` | Relay address, your username, your token | Yes (readable only by you) |
-| `~/.claude-link/log.jsonl` | Every message you sent or received, with text | Yes, it's your conversation |
+| `~/.slopstream/config.json` | Relay address, your username, your token | Yes (readable only by you) |
+| `~/.slopstream/log.jsonl` | Every message you sent or received, with text | Yes, it's your conversation |
 | `<DATA_DIR>/users.json` | Users and **hashed** tokens | Moderate |
 | `<DATA_DIR>/links.json` | Who is linked to whom | Low |
 | `<DATA_DIR>/audit.jsonl` | Events plus **full message text** | **Yes**, see below |
 | `<project>/.mcp.json` | How Claude Code starts the bridge (absolute path to this folder) | No |
-| `<project>/CLAUDE.md` | Contains the safety-rules block between `claude-link:start` and `claude-link:end` markers | No |
+| `<project>/CLAUDE.md` | Contains the safety-rules block between `slopstream:start` and `slopstream:end` markers | No |
 
 **Whoever runs the relay can read every message** in `audit.jsonl`. That's fine between friends who trust each other. It's something to fix (end-to-end encryption) before this is used among strangers; see product.md.
 
@@ -527,7 +528,7 @@ Bridge and CLI:
 
 ## 14. Troubleshooting
 
-**`command not found: claude-link`**: see the end of [Step 3](#5-step-3-get-slopstream-both-of-you).
+**`command not found: slopstream`**: see the end of [Step 3](#5-step-3-get-slopstream-both-of-you).
 
 **`error: cannot reach relay ws://...`** / **Can't reach the relay** (Aarush):
 1. Is the relay still running on Himnish's Mac, with the Mac awake? (Check Terminal 1; `lid closed = relay down`.)
@@ -542,15 +543,15 @@ Bridge and CLI:
 
 **`error: auth: bad user or token`**: wrong username or token. Check for stray spaces. If the token is lost, the relay host runs `remove-user` then `add-user` and sends the new one.
 
-**Bridge says `chat "projX" is not linked`** (visible in `link_status`): the label in `.mcp.json` doesn't match a link. Run `claude-link links`, then re-run `claude-link init <the-paired-label>` in the project.
+**Bridge says `chat "projX" is not linked`** (visible in `link_status`): the label in `.mcp.json` doesn't match a link. Run `slopstream links`, then re-run `slopstream init <the-paired-label>` in the project.
 
-**`link_status` shows `connectedToRelay: false`**: relay down, Tailscale off, or wrong address. If you moved or re-installed, run `claude-link setup ...` again.
+**`link_status` shows `connectedToRelay: false`**: relay down, Tailscale off, or wrong address. If you moved or re-installed, run `slopstream setup ...` again.
 
 **Messages don't appear in the session:**
-- Did you start Claude Code **with** `--dangerously-load-development-channels server:claude-link`? Without it the bridge can send but incoming pushes are dropped silently.
+- Did you start Claude Code **with** `--dangerously-load-development-channels server:slopstream`? Without it the bridge can send but incoming pushes are dropped silently.
 - Are you using an API key? Channels need a claude.ai login (`/status`).
 - Is Claude Code ≥ 2.1.80?
-- Inside the session run `/mcp` and check `claude-link`. If it says `failed`, restart with debug logging: `claude --debug --dangerously-load-development-channels server:claude-link`, then read `~/.claude/debug/<session-id>.txt`.
+- Inside the session run `/mcp` and check `slopstream`. If it says `failed`, restart with debug logging: `claude --debug --dangerously-load-development-channels server:slopstream`, then read `~/.claude/debug/<session-id>.txt`.
 - You see "blocked by org policy": only happens on Team/Enterprise plans where an admin must enable Channels. Not applicable to a personal Pro plan.
 
 **`send_message` says `peer_offline` / "Not sent: the peer is offline"**: the other side's linked session isn't running or can't reach the relay. By design nothing is queued; try again when they're back.
@@ -561,18 +562,18 @@ Bridge and CLI:
 
 **Pair code "unknown or expired"**: codes last 10 minutes and work once. Run `pair-create` again.
 
-**Moved the project folder**: `.mcp.json` points to the old path. Re-run `claude-link init <chat>`.
+**Moved the project folder**: `.mcp.json` points to the old path. Re-run `slopstream init <chat>`.
 
 **Your tokens/links vanished after restarting the relay**: you started it without a fixed `DATA_DIR`, from a different folder. Start it with `DATA_DIR="$HOME/.slopstream-relay"` as in Step 4.
 
 ## 15. Uninstall
 
 ```bash
-claude-link unlink projX                  # for each link
-# in each project: delete the "claude-link" entry from .mcp.json,
-# and the block between <!-- claude-link:start --> and <!-- claude-link:end --> in CLAUDE.md
-rm -rf ~/.claude-link                     # your saved login and local log
-npm unlink -g claude-link                 # removes the command (run inside the project folder)
+slopstream unlink projX                  # for each link
+# in each project: delete the "slopstream" entry from .mcp.json,
+# and the block between <!-- slopstream:start --> and <!-- slopstream:end --> in CLAUDE.md
+rm -rf ~/.slopstream                     # your saved login and local log
+npm unlink -g slopstream                 # removes the command (run inside the project folder)
 ```
 
 Relay host: stop the relay (Ctrl+C in its window) and optionally `rm -rf ~/.slopstream-relay`, and remove the Tailscale share from the Machines page.

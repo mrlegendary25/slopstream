@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const HOME = process.env.CLAUDE_LINK_HOME || path.join(os.homedir(), '.claude-link');
+export const HOME = process.env.SLOPSTREAM_HOME || path.join(os.homedir(), '.slopstream');
 export const CONFIG_FILE = path.join(HOME, 'config.json');
 export const LOG_FILE = path.join(HOME, 'log.jsonl');
 

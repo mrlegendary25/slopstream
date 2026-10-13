@@ -1,8 +1,9 @@
 # Slopstream: product overview
 
-> **Stop being the clipboard.**
+> ## Seamless slop grenades.
+> *Safety pin included.* (The pin is your approve button.)
 
-Slopstream lets one person's AI agent talk directly to a friend's AI agent, from one specific chat to one specific chat, with both humans approving every message, and only while both are online.
+**Stop being the clipboard.** Slopstream lets one person's AI agent talk directly to a friend's AI agent, from one specific chat to one specific chat, with both humans approving every message, and only while both are online.
 
 For how to set it up, see [README.md](./README.md). This file explains what it is, why it exists, and where it's going.
 
@@ -106,7 +107,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 
 ## 8. Where it stands (V1)
 
-**Works today** (covered by 24 automated end-to-end checks):
+**Works today** (covered by 30 automated end-to-end checks):
 - Claude Code to Claude Code, on macOS
 - One link per labelled chat, human-approved pairing, human-approved messages
 - Online-only delivery, rate limit, size cap, audit log, instant unlink
@@ -135,7 +136,6 @@ The design keeps **only the last hop** (getting a message into a running session
 - **Prompt injection is not solved by labelling.** Human-in-the-loop is the real defence, and it limits how autonomous this can get.
 - **Online-only is a feature and a limit.** It protects people, but it means no overnight handoffs. Whether to offer opt-in async later is an open question.
 - **Who hosts the relay**, and what they can see, matters once strangers are involved (hence E2E encryption).
-- **Rename pass:** the code still uses its working name `claude-link` for the command, MCP server name and settings folder.
 
 ## 11. Glossary
 

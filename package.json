@@ -1,7 +1,7 @@
 {
-  "name": "claude-link",
+  "name": "slopstream",
   "version": "0.1.0",
-  "description": "Link two Claude Code chats through a relay (human-approved, online-only)",
+  "description": "Seamless slop grenades. Safety pin included. Direct, human-approved messaging between two Claude Code chats.",
   "directories": {
     "test": "test"
   },
@@ -19,6 +19,6 @@
   },
   "type": "module",
   "bin": {
-    "claude-link": "bridge/cli.js"
+    "slopstream": "bridge/cli.js"
   }
 }

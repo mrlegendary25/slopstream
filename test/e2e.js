@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TMP = fs.mkdtempSync(path.join(process.env.TEST_TMP || os.tmpdir(), 'cl-e2e-'));
+const TMP = fs.mkdtempSync(path.join(process.env.TEST_TMP || os.tmpdir(), 'ss-e2e-'));
 const PORT = 18787;
 const RELAY = `ws://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -17,7 +17,7 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : '  ' + extra}`); };
 async function waitFor(fn, ms = 5000) { const t = Date.now(); while (Date.now() - t < ms) { const v = await fn(); if (v) return v; await sleep(50); } return null; }
 
-const env = (home) => ({ ...process.env, CLAUDE_LINK_HOME: path.join(TMP, home) });
+const env = (home) => ({ ...process.env, SLOPSTREAM_HOME: path.join(TMP, home) });
 const cli = (home, ...a) => execFileSync('node', [path.join(ROOT, 'bridge/cli.js'), ...a], { env: env(home), encoding: 'utf8' });
 
 // 1. relay
@@ -42,12 +42,29 @@ await waitFor(() => /Linked/.test(out));
 check('pairing approved + linked on both sides', /Linked/.test(accepted) && /Linked/.test(out), accepted + out);
 check('links listed', /projX\s+<->\s+aarush\/projX/.test(cli('h', 'links')));
 
+// 3b. naming + init (guards the product name: command, MCP server name, settings folder, markers)
+const CLI = path.join(ROOT, 'bridge/cli.js');
+const fakeHome = path.join(TMP, 'fakehome'); fs.mkdirSync(fakeHome);
+const envNoHome = { ...process.env, HOME: fakeHome }; delete envNoHome.SLOPSTREAM_HOME;
+execFileSync('node', [CLI, 'setup', RELAY, 'himnish', tok.himnish], { env: envNoHome });
+const defCfg = path.join(fakeHome, '.slopstream', 'config.json');
+check('default settings folder is ~/.slopstream, readable only by the owner', fs.existsSync(defCfg) && (fs.statSync(defCfg).mode & 0o777) === 0o600);
+const projDir = path.join(TMP, 'proj'); fs.mkdirSync(projDir);
+for (let i = 0; i < 2; i++) execFileSync('node', [CLI, 'init', 'projX'], { cwd: projDir, env: env('h') });
+const mcpJson = JSON.parse(fs.readFileSync(path.join(projDir, '.mcp.json'), 'utf8'));
+const entry = mcpJson.mcpServers?.slopstream;
+check('init writes .mcp.json entry "slopstream" with SLOPSTREAM_CHAT and the bridge path',
+  entry?.env?.SLOPSTREAM_CHAT === 'projX' && /bridge[\\/]server\.js$/.test(entry?.args?.[0] || ''));
+const mdText = fs.readFileSync(path.join(projDir, 'CLAUDE.md'), 'utf8');
+check('init adds the safety-rules block exactly once (idempotent)', (mdText.match(/<!-- slopstream:start -->/g) || []).length === 1 && /ANOTHER PERSON'S AI AGENT/.test(mdText));
+check('help text carries the tagline', /seamless slop grenades/i.test(execFileSync('node', [CLI], { encoding: 'utf8' })));
+
 // 4. bridges
 async function startBridge(home, chat) {
   const inbox = [];
   const client = new Client({ name: 'test-' + home, version: '0' }, { capabilities: {} });
   client.fallbackNotificationHandler = async (n) => { if (n.method === 'notifications/claude/channel') inbox.push(n.params); };
-  const transport = new StdioClientTransport({ command: 'node', args: [path.join(ROOT, 'bridge/server.js')], env: { ...env(home), CLAUDE_LINK_CHAT: chat }, stderr: 'ignore' });
+  const transport = new StdioClientTransport({ command: 'node', args: [path.join(ROOT, 'bridge/server.js')], env: { ...env(home), SLOPSTREAM_CHAT: chat }, stderr: 'ignore' });
   await client.connect(transport);
   const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); return { err: !!r.isError, text: r.content[0].text }; };
   return { client, inbox, call };
@@ -56,6 +73,9 @@ let H = await startBridge('h', 'projX');
 let A = await startBridge('a', 'projX');
 const caps = H.client.getServerCapabilities();
 check('declares claude/channel capability', !!caps?.experimental?.['claude/channel']);
+check('MCP server is named "slopstream" (this becomes the <channel source=...> tag)', H.client.getServerVersion()?.name === 'slopstream');
+check('agent instructions reference source="slopstream" and the untrusted-sender rules',
+  /source="slopstream"/.test(H.client.getInstructions() || '') && /untrusted/i.test(H.client.getInstructions() || ''));
 check('agent tools are only send_message + link_status (no pairing/allowlist tools)',
   (await H.client.listTools()).tools.map(t => t.name).sort().join() === 'link_status,send_message');
 check('both online -> peerOnline true', !!(await waitFor(async () => JSON.parse((await H.call('link_status')).text).peerOnline)));
