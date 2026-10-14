@@ -51,7 +51,8 @@ const send = (ws, o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(
 function notifyPresence(link, changedUser, changedChat) {
   const other = peerOf(link, changedUser, changedChat);
   const w = online.get(key(other.user, other.chat));
-  if (w) send(w, { t: 'presence', peerOnline: online.has(key(changedUser, changedChat)) });
+  const changed = online.get(key(changedUser, changedChat));
+  if (w) send(w, { t: 'presence', peerOnline: !!changed, peerAgent: changed ? changed.agent : null });
 }
 
 function rateOk(linkId) {
@@ -103,6 +104,8 @@ function handleHello(ws, m) {
     crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(given));
   if (!ok) { audit({ ev: 'auth_fail', user }); send(ws, { t: 'error', code: 'auth', message: 'bad user or token' }); return ws.close(4003, 'auth'); }
   ws.authed = true; ws.user = user;
+  // Which kind of agent is behind this session (claude, codex, console...). Informational only.
+  ws.agent = /^[a-z0-9_-]{1,20}$/.test(String(m.agent || '')) ? String(m.agent) : 'unknown';
 
   if (!m.chat) { ws.mode = 'admin'; return send(ws, { t: 'welcome', mode: 'admin' }); }
 
@@ -115,7 +118,8 @@ function handleHello(ws, m) {
   ws.mode = 'session'; ws.chat = chat; ws.linkId = link.id;
   online.set(k, ws);
   const peer = peerOf(link, user, chat);
-  send(ws, { t: 'welcome', mode: 'session', link: { id: link.id, peer }, peerOnline: online.has(key(peer.user, peer.chat)) });
+  const peerWs = online.get(key(peer.user, peer.chat));
+  send(ws, { t: 'welcome', mode: 'session', link: { id: link.id, peer }, peerOnline: !!peerWs, peerAgent: peerWs ? peerWs.agent : null });
   notifyPresence(link, user, chat);
   audit({ ev: 'online', user, chat, linkId: link.id });
 }
@@ -165,7 +169,10 @@ function handleAdmin(ws, m) {
       return;
     }
     case 'list_links': {
-      return send(ws, { t: 'links', links: links.filter(l => l.a.user === user || l.b.user === user) });
+      // Presence of a link's two sessions is visible to the two people on that link, and nobody else.
+      const mine = links.filter(l => l.a.user === user || l.b.user === user)
+        .map(l => ({ ...l, online: { a: online.has(key(l.a.user, l.a.chat)), b: online.has(key(l.b.user, l.b.chat)) } }));
+      return send(ws, { t: 'links', links: mine });
     }
     case 'unlink': {
       const chat = String(m.chat || '');
@@ -184,6 +191,17 @@ function handleAdmin(ws, m) {
 
 function handleSession(ws, m) {
   if (m.t === 'ping') return send(ws, { t: 'pong' });
+  if (m.t === 'receipt') {
+    // Tells the sender whether the OTHER HUMAN let the message through ('accepted') or refused it ('declined').
+    // Fixed vocabulary only; never carries free text.
+    const rlink = findLink(ws.user, ws.chat);
+    if (!rlink || !['accepted', 'declined'].includes(m.status)) return;
+    const rpeer = peerOf(rlink, ws.user, ws.chat);
+    const rw = online.get(key(rpeer.user, rpeer.chat));
+    audit({ ev: 'receipt', linkId: rlink.id, from: ws.user, to: rpeer.user, id: String(m.id || '').slice(0, 64), status: m.status });
+    if (rw) send(rw, { t: 'receipt', id: String(m.id || '').slice(0, 64), from: ws.user, status: m.status });
+    return;
+  }
   if (m.t !== 'msg') return;
   const link = findLink(ws.user, ws.chat);
   if (!link) return send(ws, { t: 'ack', id: m.id, delivered: false, reason: 'not_linked' });
@@ -194,7 +212,7 @@ function handleSession(ws, m) {
   const peer = peerOf(link, ws.user, ws.chat);
   const pw = online.get(key(peer.user, peer.chat));
   if (!pw) { audit({ ev: 'undelivered_offline', from: ws.user, to: peer.user, linkId: link.id }); return send(ws, { t: 'ack', id: m.id, delivered: false, reason: 'peer_offline' }); }
-  const out = { t: 'msg', id: m.id, from: ws.user, fromChat: ws.chat, contextId: String(m.contextId || m.id), parts: [{ kind: 'text', text }] };
+  const out = { t: 'msg', id: m.id, from: ws.user, fromChat: ws.chat, fromAgent: ws.agent, contextId: String(m.contextId || m.id), parts: [{ kind: 'text', text }] };
   send(pw, out);
   audit({ ev: 'msg', linkId: link.id, from: ws.user, to: peer.user, id: m.id, contextId: out.contextId, text });
   send(ws, { t: 'ack', id: m.id, delivered: true });

@@ -107,15 +107,17 @@ The main risk is **prompt injection**: text from another agent entering your age
 
 ## 8. Where it stands (V1)
 
-**Works today** (covered by 30 automated end-to-end checks):
+**Works today** (covered by 61 automated end-to-end checks):
 - Claude Code to Claude Code, on macOS
+- **Codex** on either side: Claude to Codex, Codex to Claude, Codex to Codex. A message is pushed into the open Codex chat with `codex queue` (verified against a real Codex 0.162.1), behind a hard approval pop-up, with an inbox fallback
+- A one-command **solo test mode** (`slopstream demo`) so one person can test both sides on one Mac
 - One link per labelled chat, human-approved pairing, human-approved messages
 - Online-only delivery, rate limit, size cap, audit log, instant unlink
 - Relay run by one of the two friends over Tailscale
 
 **Not yet:**
-- Verified in a **live** Claude Code session (the first thing to test; README Part 10 is the rehearsal)
-- Agents other than Claude Code
+- Verified in a **live** Claude Code session or with the real macOS pop-ups (TESTING.md walks through it)
+- Agents other than Claude Code and Codex
 - A hosted relay, end-to-end encryption, full A2A, teams
 
 ## 9. Roadmap
@@ -124,7 +126,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 |---|---|---|
 | **V1** (now) | Two friends, Claude Code, one pair of chats | Everything above; prove the flow in a real session |
 | **V2** | Something you can give to a stranger | Hosted relay, **end-to-end encryption**, proper presence, full **A2A** message framing, a packaged Claude Code plugin with an in-app `/link` flow |
-| **V3** | Not just Claude | **Adapters for other agents** (Codex and others). Outbound is easy because they support MCP. Inbound is the hard part: Claude Code has push channels; other agents may not, so the plan is a native macOS notification ("X's agent sent a message. Approve?") plus an inbox the agent can read. Also per-link policies (allowed message types, no attachments, turn limits) |
+| **V3** | More agents | **Codex shipped early in V1.x.** More adapters (Gemini CLI, Cursor, and others). Outbound is easy because they support MCP. Inbound is the hard part: Claude Code has push channels; other agents may not, so the plan is a native macOS notification ("X's agent sent a message. Approve?") plus an inbox the agent can read. Also per-link policies (allowed message types, no attachments, turn limits) |
 | **V4** | Teams | Many-to-many links, discovery, shared policies, audit for organisations |
 
 The design keeps **only the last hop** (getting a message into a running session) specific to each agent. Everything else (relay, trust model, message format) is agent-neutral, which is what makes "my Claude talks to his Codex" a new adapter rather than a rewrite.

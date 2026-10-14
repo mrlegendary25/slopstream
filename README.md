@@ -3,7 +3,7 @@
 > ## Seamless slop grenades.
 > *Safety pin included.* (The pin is your approve button.)
 
-**Stop being the clipboard.** Slopstream links one Claude Code chat of yours to one Claude Code chat of a friend's, so the two agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
+**Stop being the clipboard.** Slopstream links one Claude Code (or Codex) chat of yours to one chat of a friend's, so the two agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
 
 - A message arrives as a **new prompt in the chat that is already open**. It never starts a new chat.
 - **Both humans approve**: every outgoing message and every incoming one.
@@ -12,7 +12,7 @@
 
 What it is and why it exists: see [product.md](./product.md). This file is the how-to.
 
-> **Status.** V1. The relay, pairing, delivery rules and security checks are covered by automated end-to-end tests (`npm test`). It has **not yet been verified inside a live Claude Code session**. Part 10 (rehearsal on your own Mac) is how you check that before involving your friend.
+> **Status.** V1. Works with **Claude Code** and **Codex**. The relay, pairing, delivery rules, approval gates and security checks are covered by automated end-to-end tests (`npm test`, 61 checks), and the Codex push was verified against a real Codex. It has **not yet been verified inside a live Claude Code session** or with the macOS pop-ups. **[TESTING.md](./TESTING.md)** walks you through that in three parts: on your own laptop, with a friend on Claude, and with a friend on Codex.
 
 ---
 
@@ -27,7 +27,7 @@ What it is and why it exists: see [product.md](./product.md). This file is the h
 7. [Step 5: Connect each Mac to the relay (both)](#7-step-5-connect-each-mac-to-the-relay-both)
 8. [Step 6: Pair one chat with one chat](#8-step-6-pair-one-chat-with-one-chat)
 9. [Step 7: Turn it on in a project and use it](#9-step-7-turn-it-on-in-a-project-and-use-it)
-10. [Rehearse alone on your own Mac first (recommended)](#10-rehearse-alone-on-your-own-mac-first-recommended)
+10. [Test it (alone, with a friend, with Codex)](#10-test-it-alone-with-a-friend-with-codex)
 11. [Every day after setup](#11-every-day-after-setup)
 12. [Reference](#12-reference)
 13. [Security: what is enforced and what is not](#13-security-what-is-enforced-and-what-is-not)
@@ -143,7 +143,7 @@ npm link
 slopstream
 ```
 
-You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`).
+You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`, `status`, `demo`).
 
 If you get `command not found: slopstream`:
 - If you use **nvm** and switched Node versions, run `npm link` again under the Node version you're using now.
@@ -158,7 +158,7 @@ If you get `command not found: slopstream`:
 npm test
 ```
 
-It should end with `30 passed, 0 failed`. A line saying `error: auth: bad user or token` in the middle is expected; the test checks that a wrong password is rejected.
+It runs two test files and should print `30 passed, 0 failed` and then `31 passed, 0 failed`. A line saying `error: auth: bad user or token` in the middle is expected; the test checks that a wrong password is rejected.
 
 ## 6. Step 4: Start the relay (the relay host only)
 
@@ -367,74 +367,27 @@ In the chat, type: **"Use link_status."** Claude should show something like:
 
 **If the peer is offline**, the send fails with a clear message and **nothing is queued**. Try again when they're back.
 
-## 10. Rehearse alone on your own Mac first (recommended)
+## 10. Test it (alone, with a friend, with Codex)
 
-Before involving Aarush, run both sides yourself on one Mac. This is also the quickest way to confirm that messages show up properly inside **live** Claude Code, which the automated tests can't prove. You don't need Tailscale for this.
+See **[TESTING.md](./TESTING.md)**. It has three parts:
 
-You'll use two fake users, two config folders, and two project folders.
+1. **Self laptop.** One command, `slopstream demo up`, gives you two fake people on your own Mac. Test the plumbing with no AI at all, then with real Claude sessions.
+2. **Different laptop, Claude to Claude.** The real setup, with a test script to run together.
+3. **Different laptop, Claude to Codex.** You on Claude Code, your friend on Codex.
 
-**Terminal 1: the rehearsal relay** (local only, separate data folder):
+Run Part 1 before involving your friend.
 
-```bash
-cd /Users/mrlegendary/Code/learning/products/slopstream
-DATA_DIR="$HOME/.slopstream-rehearsal" node relay/admin.js add-user rehearsal-a
-DATA_DIR="$HOME/.slopstream-rehearsal" node relay/admin.js add-user rehearsal-b
-# copy both tokens from the output
-DATA_DIR="$HOME/.slopstream-rehearsal" node relay/server.js     # leave running
-```
+### Using Codex instead of Claude Code
 
-**Terminal 2: set up and pair.** Replace the tokens. Separate `SLOPSTREAM_HOME` folders keep this from touching your real setup:
+Everything above is the same (Tailscale, relay, `setup`, pairing). Only the project step differs:
 
 ```bash
-SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream setup ws://127.0.0.1:8787 rehearsal-a <token-a>
-SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-b" slopstream setup ws://127.0.0.1:8787 rehearsal-b <token-b>
-
-SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream pair-create demo
-# prints a code, then waits
+cd ~/path/to/projectX
+slopstream init projX --agent codex
+codex
 ```
 
-**Terminal 3:**
-
-```bash
-SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-b" slopstream pair-accept <CODE> demo
-```
-
-Back in Terminal 2 press `y`.
-
-**Create the two project folders:**
-
-```bash
-mkdir -p ~/slopstream-rehearsal/a ~/slopstream-rehearsal/b
-cd ~/slopstream-rehearsal/a && slopstream init demo
-cd ~/slopstream-rehearsal/b && slopstream init demo
-```
-
-**Tell each project which config folder to use.** Open `~/slopstream-rehearsal/a/.mcp.json` and add a line inside `env`:
-
-```json
-"env": {
-  "SLOPSTREAM_CHAT": "demo",
-  "SLOPSTREAM_HOME": "/Users/mrlegendary/.slopstream-rehearsal-a"
-}
-```
-
-Do the same in `b/.mcp.json` with `.slopstream-rehearsal-b`. (Use your real home path.)
-
-**Run both sides** in two new terminals:
-
-```bash
-cd ~/slopstream-rehearsal/a && claude --dangerously-load-development-channels server:slopstream
-cd ~/slopstream-rehearsal/b && claude --dangerously-load-development-channels server:slopstream
-```
-
-In **a**, ask: *"Send the linked agent this message: hello from A."* Approve the prompt. In **b**, the message should appear and Claude should show it to you and wait.
-
-If it works, you've verified the whole path. Clean up with:
-
-```bash
-SLOPSTREAM_HOME="$HOME/.slopstream-rehearsal-a" slopstream unlink demo
-rm -rf ~/slopstream-rehearsal ~/.slopstream-rehearsal-a ~/.slopstream-rehearsal-b ~/.slopstream-rehearsal
-```
+On first run in that folder: **trust the folder**, choose **"Trust all and continue"** on the hooks prompt, and send any first message (for example `ready`) so Slopstream learns which Codex chat to deliver into. After that, approved messages arrive as a new prompt in that chat. Because Codex has no equivalent of Claude Code's push channel, Slopstream asks you itself, with a macOS pop-up, before anything is sent or shown to the agent. Full details and the fallback inbox (`check slopstream`) are in TESTING.md Part 3.
 
 ## 11. Every day after setup
 
@@ -460,15 +413,20 @@ Setup, pairing and `init` are one-time. The relay host's Mac has to be awake and
 | `slopstream pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
 | `slopstream links` | List your links |
 | `slopstream unlink <chat>` | Cut a link immediately, on both sides |
-| `slopstream init <chat>` | In a project folder: write `.mcp.json` and the safety rules |
+| `slopstream init <chat> [--agent claude\|codex]` | In a project folder: wire it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`) |
+| `slopstream status` | Is this Mac ready? Login, relay reachable, links and who is online, installed agents |
+| `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--port N]` | Solo test: private relay + two fake people + two project folders, on this Mac |
+| `slopstream demo status` / `demo down` | Show who is online in the demo / stop the demo relay |
+| `slopstream demo peer --side a\|b` | A no-AI stand-in for one side of the demo (type to send, see what arrives) |
+| `slopstream simulate --chat <chat> [--agent claude\|codex]` | The same stand-in against your real setup |
 | `node relay/admin.js add-user <name>` | **[relay host]** create a user, print the token once |
 | `node relay/admin.js list-users` / `remove-user <name>` | **[relay host]** manage users |
 | `node relay/server.js` | **[relay host]** run the relay |
-| `npm test` | Run the 30 end-to-end checks |
+| `npm test` | Run the 61 end-to-end checks |
 
 ### What Claude can do in a linked chat
 
-Only two tools: **`send_message`** and **`link_status`**. Claude cannot pair, unlink, change who's allowed, or read your token.
+Only **`send_message`** and **`link_status`** (plus **`check_inbox`** on Codex). The agent cannot pair, unlink, change who's allowed, or read your token.
 
 ### Settings (environment variables)
 
@@ -489,6 +447,10 @@ Bridge and CLI:
 |---|---|---|
 | `SLOPSTREAM_HOME` | `~/.slopstream` | Where your login and local log live |
 | `SLOPSTREAM_CHAT` | the project's folder name | Which chat label this session is. `init` sets it for you |
+| `SLOPSTREAM_AGENT` | `claude` | `claude` (push via channel), `codex` (push via `codex queue`), or `generic` (inbox only). `init` sets it |
+| `SLOPSTREAM_GATE` | `off` for claude, `native` otherwise | `native` = the bridge asks you with a macOS pop-up before sending or showing a message |
+| `SLOPSTREAM_GATE_CMD` | none | Your own approver command (JSON on stdin, exit 0 = approve). For non-macOS or tests |
+| `SLOPSTREAM_CODEX_BIN` | `codex` | Which `codex` program to call for the push |
 
 ### Where things are stored
 
@@ -500,6 +462,7 @@ Bridge and CLI:
 | `<DATA_DIR>/links.json` | Who is linked to whom | Low |
 | `<DATA_DIR>/audit.jsonl` | Events plus **full message text** | **Yes**, see below |
 | `<project>/.mcp.json` | How Claude Code starts the bridge (absolute path to this folder) | No |
+| `<project>/.codex/config.toml`, `AGENTS.md` | The Codex equivalents of the two files around this row (between `slopstream:start`/`end` markers) | No |
 | `<project>/CLAUDE.md` | Contains the safety-rules block between `slopstream:start` and `slopstream:end` markers | No |
 
 **Whoever runs the relay can read every message** in `audit.jsonl`. That's fine between friends who trust each other. It's something to fix (end-to-end encryption) before this is used among strangers; see product.md.
@@ -517,7 +480,8 @@ Bridge and CLI:
 
 **Soft rules (depend on Claude and on you):**
 - *Incoming messages are untrusted.* Every inbound message is wrapped and labelled, characters that could forge the wrapper are neutralised, and Claude is told to show you and wait. But a language model can still be tricked by a clever prompt-injection. **Treat what the other agent says like a stranger's email.**
-- *Outgoing approval* is Claude Code's permission prompt. It protects you only if you **don't** pick "always allow".
+- *Outgoing approval (Claude Code)* is Claude Code's permission prompt. It protects you only if you **don't** pick "always allow".
+- *Codex* has a **hard** gate: the bridge itself asks you with a pop-up before any message goes out or reaches the agent. If it can't ask, the answer is no.
 
 **Your habits:**
 - Don't add `send_message` to your always-allow list.
@@ -580,10 +544,10 @@ Relay host: stop the relay (Ctrl+C in its window) and optionally `rm -rf ~/.slop
 
 ## 16. Known limits
 
-- **Not yet proven in a live Claude Code session.** Do the rehearsal in Part 10 first. If a push doesn't render as expected, tell the maintainer what `/mcp` and the debug log show.
+- **Not yet proven in a live Claude Code session or with the real macOS pop-ups.** Do TESTING.md Part 1 first. If a push doesn't render as expected, tell the maintainer what `/mcp` and the debug log show.
 - **Inbound approval is soft** (see Part 13).
 - **Both Macs must be on, and the relay host's Mac must be awake.** There's no always-on hosted relay yet.
-- **Claude Code only (V1).** A chat is a labelled project, not a specific Claude session id. Codex and other agents are on the roadmap in product.md.
+- **Claude Code and Codex.** A chat is a labelled project, not a specific session id. Codex needs one first message per session to bind to the right chat, and a recent Codex (verified on 0.162.1). Other agents are on the roadmap in product.md.
 - **Channels are a research preview** and may change in future Claude Code versions.
 - The message format is shaped like the A2A standard (`contextId`, `parts[]`) but isn't full A2A yet.
 - The relay host can read messages (no end-to-end encryption yet).
