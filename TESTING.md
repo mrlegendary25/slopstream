@@ -39,14 +39,14 @@ Install Slopstream itself (every person who will test, on their own Mac). Two wa
 
 **As a Claude Code plugin** (inside a Claude Code session):
 ```
-/plugin marketplace add <owner>/slopstream
+/plugin marketplace add mrlegendary25/slopstream
 /plugin install slopstream@slopstream
 ```
-(Replace `<owner>/slopstream` with wherever this project is actually hosted.) This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started` as slash commands, with dependencies installed automatically on first use. You'll still need a real terminal for `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` (they carry a private token or need an interactive y/N) — `/slopstream:get-started` tells you the exact path to run them from.
+This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started` as slash commands, with dependencies installed automatically on first use. You'll still need a real terminal for `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` (they carry a private token or need an interactive y/N) — `/slopstream:get-started` tells you the exact path to run them from.
 
 **Or clone it and link the CLI** (needed either way if you're the relay host, or you just prefer a terminal):
 ```bash
-git clone <this-repository's-url>
+git clone https://github.com/mrlegendary25/slopstream.git
 cd slopstream
 npm install
 npm link

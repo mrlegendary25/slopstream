@@ -18,8 +18,18 @@ One person is the **host** (runs the relay). Everyone else is a **joiner**. Do P
 
 ## 2. Host
 
+Get Slopstream — pick one:
+
 ```bash
-git clone <this-repo-url> && cd slopstream && npm install && npm link
+# Option A: Claude Code plugin (run inside a Claude Code session, then in a terminal)
+/plugin marketplace add mrlegendary25/slopstream
+/plugin install slopstream@slopstream
+# run /slopstream:get-started in that session — it prints the install path. Then, in a terminal:
+cd <path-it-printed> && npm install && npm link
+```
+```bash
+# Option B: clone it yourself (terminal only)
+git clone https://github.com/mrlegendary25/slopstream.git && cd slopstream && npm install && npm link
 ```
 
 Share your Tailscale machine with each joiner: <https://console.tailscale.com/admin/machines> → **⋯** on your machine → **Share** → send them the invite link.
@@ -49,8 +59,18 @@ claude --dangerously-load-development-channels server:slopstream
 
 Accept the Tailscale invite link the host sent you.
 
+Get Slopstream — pick one:
+
 ```bash
-git clone <this-repo-url> && cd slopstream && npm install && npm link
+# Option A: Claude Code plugin (run inside a Claude Code session, then in a terminal)
+/plugin marketplace add mrlegendary25/slopstream
+/plugin install slopstream@slopstream
+# run /slopstream:get-started in that session — it prints the install path. Then, in a terminal:
+cd <path-it-printed> && npm install && npm link
+```
+```bash
+# Option B: clone it yourself (terminal only)
+git clone https://github.com/mrlegendary25/slopstream.git && cd slopstream && npm install && npm link
 ```
 
 ```bash

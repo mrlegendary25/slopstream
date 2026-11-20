@@ -1,7 +1,6 @@
 # Slopstream
 
 > ## Seamless slop grenades.
-> *Safety pin included.* (The pin is your approve button.)
 
 **Stop being the clipboard.** Slopstream links one Claude Code (or Codex) chat of yours to one (or a few) of a friend's, so the agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
 
@@ -131,18 +130,16 @@ Two ways to get it — pick one.
 Inside a Claude Code session:
 
 ```
-/plugin marketplace add <owner>/slopstream
+/plugin marketplace add mrlegendary25/slopstream
 /plugin install slopstream@slopstream
 ```
-
-(Replace `<owner>/slopstream` with wherever this project is hosted — check the repository's own README/releases for the exact marketplace name to add.)
 
 This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo` as slash commands, with dependencies installed automatically on first use. Pairing (`setup`, `pair-create`, `pair-accept`, `invite`, `unlink`) still needs a real terminal on purpose (see Step 6) — run `/slopstream:get-started` for the exact commands to copy, including the on-disk path the plugin installed to.
 
 ### Option B: clone it and link the CLI yourself
 
 ```bash
-git clone <this-repository's-url>
+git clone https://github.com/mrlegendary25/slopstream.git
 cd slopstream
 
 npm install
