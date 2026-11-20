@@ -1,9 +1,6 @@
 # Slopstream: product overview
 
 > ## Seamless slop grenades.
-> *Safety pin included.* (The pin is your approve button.)
-
-**Stop being the clipboard.** Slopstream lets one person's AI agent talk directly to a friend's AI agent, from one specific chat to one specific chat, with both humans approving every message, and only while both are online.
 
 For how to set it up, see [README.md](./README.md). This file explains what it is, why it exists, and where it's going.
 
@@ -19,17 +16,15 @@ Most knowledge work between people now looks like this:
 4. They copy *that* answer and send it back.
 5. Repeat.
 
-Two powerful agents, and between them a human doing manual copy-paste. We've started calling the walls of text that fly back and forth *slop grenades*. They're long, unedited, and lobbed at the other person to deal with. The humans have become the **clipboard**.
-
-It's slow, it loses context at every hop, it floods people with output nobody read, and it hides the real question inside pages of generated text.
+Two powerful agents, and between them a human doing manual copy-paste. We've started calling the walls of text that fly back and forth *slop grenades*. They're long, unedited, and lobbed at the other person to deal with.
 
 ## 2. What Slopstream is
 
 A direct, **human-approved** channel between **two specific chats** run by two people.
 
-- You tell your Claude: *"Ask Aarush whether the migration is merged."*
-- The message goes to **Aarush's already-open chat** as a new prompt.
-- His Claude shows it to him. He decides. If he wants, his agent answers back the same way.
+- You tell your Claude: *"Ask my friend whether the migration is merged."*
+- The message goes to **your friend's already-open chat** as a new prompt.
+- Their Claude shows it to them. They decide. If they want, their agent answers back the same way.
 - Neither of you copied or pasted anything, and neither of you gave up control.
 
 It is **not** a chatbot network, a public inbox for your agent, or an autonomous agent swarm. It's a narrow pipe between two chats whose owners agreed to connect them.
@@ -55,8 +50,7 @@ These were decided up front and every feature is held to them.
 4. **Arrives in the current chat, as a new prompt.** Never a new chat, never a side channel. The conversation stays where the context already is.
 5. **Treat the other agent as a stranger.** Everything inbound is marked *untrusted*, the agent is told to be cautious, and nothing sensitive moves without explicit approval.
 6. **The agent can't change the rules.** Pairing, unlinking and who's allowed are done by the human in the terminal. The agent only has "send a message" and "check status". A malicious message can't talk its way into widening access.
-7. **Short, purposeful, text-only.** The cure for slop grenades is not more slop. Messages are plain text with a size cap and a rate limit, so they stay small: a question, an answer, a pointer.
-8. **Don't reinvent the wheel.** Use existing protocols and tools. Build only the missing piece.
+
 
 ## 5. How it works
 
@@ -66,16 +60,16 @@ These were decided up front and every feature is held to them.
 
 - **Bridge**: a small program Claude Code starts inside each linked chat. It speaks MCP to the chat. It pushes inbound messages in (as a Claude Code *channel*) and gives Claude the `send_message` and `link_status` tools.
 - **Relay**: a tiny server that handles logins, one-time pairing, who is online, delivery, rate limits and an audit log. Today it runs on one of the friends' Macs; in future it can be hosted.
-- **CLI**: the human-only controls: `setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`.
+- **CLI**: the human-only controls: `setup`, `pair-create`, `pair-accept`, `invite`, `links`, `unlink`, `init`.
 - **Network**: for now a private Tailscale network, so the relay is never exposed to the open internet.
 
 **Life of a message:**
 
-1. You: "Ask Aarush whether the migration is merged."
+1. You: "Ask my friend whether the migration is merged."
 2. Claude calls `send_message`. Claude Code asks you to approve. You do.
-3. The bridge sends it to the relay. The relay checks: valid login, linked chat, size, rate, **is the peer online right now?** If not, it fails and nothing is stored for later.
-4. If yes, the relay hands it to Aarush's bridge, which neutralises anything that could forge the message wrapper, labels it `[UNTRUSTED message from himnish's agent]` and pushes it into his open chat.
-5. Aarush's Claude shows it to him and waits. He decides what, if anything, happens next.
+3. The bridge sends it to the relay. The relay checks: valid login, linked chat, size, rate, **is the target online right now?** If not, it fails and nothing is stored for later.
+4. If yes, the relay hands it to your friend's bridge, which neutralises anything that could forge the message wrapper, labels it `[UNTRUSTED message from your agent]` and pushes it into their open chat.
+5. Your friend's Claude shows it to them and waits. They decide what, if anything, happens next.
 
 ## 6. Built on existing standards
 
@@ -116,11 +110,6 @@ The main risk is **prompt injection**: text from another agent entering your age
 - Online-only delivery, rate limit, size cap, audit log, instant leave/unlink
 - Relay run by one of the friends over Tailscale
 - **Installable as a Claude Code plugin** (`/plugin install slopstream`), bundling the CLI's safe, non-secret commands as slash commands; pairing/setup still happen in a terminal on purpose
-
-**Not yet:**
-- Verified in a **live** Claude Code session or with the real macOS pop-ups (TESTING.md walks through it)
-- Agents other than Claude Code and Codex
-- A hosted relay, end-to-end encryption, full A2A, teams-scale groups
 
 ## 9. Roadmap
 
