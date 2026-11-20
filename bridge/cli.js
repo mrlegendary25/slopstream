@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, configFile, codexThreadFile } from './config.js';
+import { loadConfig, saveConfig, configFile, codexThreadFile, pausedFile } from './config.js';
 import { admin, nextMsg } from './net.js';
 import { runInit } from './init.js';
 import { runStatus } from './status.js';
@@ -91,6 +91,21 @@ async function main() {
       ws.send(JSON.stringify({ t: 'unlink', chat }));
       await nextMsg(ws, ['unlinked_ok']); console.log(`Unlinked "${chat}".`); ws.close(); break;
     }
+    case 'pause': {
+      // Local-only: makes the bridge refuse to connect to the relay for this chat, so nobody can reach it,
+      // without touching the link itself. Takes effect the next time a session for this chat starts.
+      const chat = rest[0]; if (!chat) die('usage: slopstream pause <chat-label>');
+      const f = pausedFile(chat); fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(f, JSON.stringify({ pausedAt: new Date().toISOString() }), { mode: 0o600 });
+      console.log(`Paused "${chat}". Restart any Claude/Codex session using it for this to take effect.\nNobody can reach it until you run: slopstream resume ${chat}`);
+      break;
+    }
+    case 'resume': {
+      const chat = rest[0]; if (!chat) die('usage: slopstream resume <chat-label>');
+      fs.rmSync(pausedFile(chat), { force: true });
+      console.log(`Resumed "${chat}". Restart any Claude/Codex session using it to reconnect.`);
+      break;
+    }
     case 'init': {
       const chat = rest[0]; if (!chat) die('usage: slopstream init <chat-label> [--agent claude|codex]   (run inside the project folder)');
       const r = runInit({ chat, agent: opt('agent') || 'claude', cwd: process.cwd(), home: opt('home') });
@@ -141,6 +156,8 @@ usage: slopstream <command>
   invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)
   links                              list your links (and who else is in each group)
   unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
+  pause <chat>                       stop a chat connecting to the relay, without unlinking it
+  resume <chat>                      undo pause
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
   demo up|status|peer|down           test everything on THIS laptop alone (see TESTING.md)

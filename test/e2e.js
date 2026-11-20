@@ -149,6 +149,18 @@ let used = 3, limited = null;
 for (let i = 0; i < 10; i++) { const x = await H.call('send_message', { text: 'm' + i }); if (!x.err) used++; else { limited = x.text; break; } }
 check('rate limit kicks in at 6 messages/window', used === 6 && /rate_limited/.test(limited || ''), `${used} ${limited}`);
 
+// 9b. pause: a local-only switch that stops a chat connecting, without touching the link itself
+await H.client.close();
+cli('h', 'pause', 'projX');
+let HP = await startBridge('h', 'projX');
+const pausedStatus = JSON.parse((await HP.call('link_status')).text);
+check('paused chat never connects to the relay', !pausedStatus.connectedToRelay && /PAUSED/.test(pausedStatus.problem || ''), JSON.stringify(pausedStatus));
+check('paused chat refuses to send', (await HP.call('send_message', { text: 'x' })).err);
+await HP.client.close();
+cli('h', 'resume', 'projX');
+H = await startBridge('h', 'projX');
+check('resumed chat reconnects normally', !!(await waitFor(async () => JSON.parse((await H.call('link_status')).text).connectedToRelay)));
+
 // 10. unlink cuts both sides immediately
 cli('h', 'unlink', 'projX');
 await sleep(600);

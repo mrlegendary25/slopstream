@@ -89,3 +89,33 @@ claude --dangerously-load-development-channels server:slopstream
 **Check it worked (either side):** inside Claude, type `Use link_status.` → expect `peerOnline: true`.
 
 **Adding a 3rd person:** host runs `slopstream invite projX` instead of `pair-create`; the new person still runs `pair-accept` as above (up to `MAX_GROUP_SIZE`, default 3).
+
+---
+
+## 4. Stop / unlink / delete
+
+Pick what you actually need — these stack, top to bottom.
+
+**Stop being reachable on `projX` for now, keep the link** (anyone — host or joiner):
+```bash
+slopstream pause projX     # undo with: slopstream resume projX
+```
+Restart Claude/Codex in that folder for it to take effect.
+
+**Leave the link entirely** (anyone — host or joiner; dissolves it for everyone once fewer than 2 chats remain):
+```bash
+slopstream unlink projX
+```
+
+**Remove Slopstream from this machine** (anyone, after unlinking everything):
+```bash
+rm -rf ~/.slopstream
+npm unlink -g slopstream
+```
+
+**Host only — also stop/delete the relay:**
+```bash
+# Ctrl+C in the terminal running relay/server.js, then:
+rm -rf ~/.slopstream-relay
+```
+Also remove the Tailscale share from <https://console.tailscale.com/admin/machines> if you no longer want that joiner reaching this machine.

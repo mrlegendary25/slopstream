@@ -8,6 +8,7 @@ export const defaultHome = () => process.env.SLOPSTREAM_HOME || path.join(os.hom
 export const configFile = (home = defaultHome()) => path.join(home, 'config.json');
 export const logFile = (home = defaultHome()) => path.join(home, 'log.jsonl');
 export const codexThreadFile = (chat, home = defaultHome()) => path.join(home, 'codex-threads', `${chat}.json`);
+export const pausedFile = (chat, home = defaultHome()) => path.join(home, 'paused', `${chat}.json`);
 
 export function loadConfig(home = defaultHome()) {
   try { return JSON.parse(fs.readFileSync(configFile(home), 'utf8')); } catch { return null; }

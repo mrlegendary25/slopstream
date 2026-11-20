@@ -387,6 +387,8 @@ In the chat, type: **"Use link_status."** Claude should show something like:
 
 **If the other side is offline**, the send fails with a clear message and **nothing is queued**. Try again when they're back.
 
+**A link belongs to the project folder, not to one specific conversation.** If you `/exit` Claude and later open a brand new Claude Code session in the *same* linked folder, it reconnects as the same chat automatically — your friend can message it again without you doing anything. If you want to stop that (say, you're done for the day and don't want to automatically be reachable next time you open that folder), run `slopstream pause projX` once; it keeps the link but makes that chat refuse to connect until you run `slopstream resume projX`. This takes effect the next time a session starts, not retroactively on one that's already open.
+
 ## 10. Test it (alone, with a friend, with Codex)
 
 See **[TESTING.md](./TESTING.md)**. It has three parts:
@@ -434,6 +436,8 @@ Setup, pairing and `init` are one-time. The relay host's machine has to be awake
 | `slopstream invite <chat> [--yes]` | Add another person to a chat that's **already** linked, up to the relay's `MAX_GROUP_SIZE` |
 | `slopstream links` | List your links (and who else is in each group) |
 | `slopstream unlink <chat>` | Leave a link; it dissolves for everyone if fewer than 2 chats would remain |
+| `slopstream pause <chat>` | Stop that chat connecting to the relay (nobody can reach it), without unlinking it |
+| `slopstream resume <chat>` | Undo `pause` |
 | `slopstream init <chat> [--agent claude\|codex]` | In a project folder: wire it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`) |
 | `slopstream status` | Is this machine ready? Login, relay reachable, links and who is online, installed agents |
 | `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--c claude\|codex] [--port N]` | Solo test: private relay + two or three fake people + their project folders, on this machine |
@@ -500,7 +504,7 @@ Bridge and CLI:
 - Wrong or missing token → rejected.
 - Text only, 8000 characters max, 30 messages per 10 minutes per link.
 - `unlink` takes effect immediately.
-- Claude has no tool that can pair, invite, unlink or change the allowlist.
+- Claude has no tool that can pair, invite, unlink, pause/resume or change the allowlist.
 
 **Soft rules (depend on Claude and on you):**
 - *Incoming messages are untrusted.* Every inbound message is wrapped and labelled, characters that could forge the wrapper are neutralised, and Claude is told to show you and wait. But a language model can still be tricked by a clever prompt-injection. **Treat what another agent says like a stranger's email.**
@@ -568,7 +572,6 @@ Relay host: stop the relay (Ctrl+C in its window) and optionally `rm -rf ~/.slop
 
 ## 16. Known limits
 
-- **Not yet proven in a live Claude Code session or with the real macOS pop-ups.** Do TESTING.md Part 1 first. If a push doesn't render as expected, file an issue with what `/mcp` and the debug log show.
 - **Inbound approval is soft** (see Part 13).
 - **Both machines must be on, and the relay host's machine must be awake.** There's no always-on hosted relay yet.
 - **Claude Code and Codex.** A chat is a labelled project, not a specific session id. Codex needs one first message per session to bind to the right chat, and a recent Codex (verified on 0.162.1). Other agents are on the roadmap in product.md.

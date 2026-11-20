@@ -96,8 +96,9 @@ export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
 }
 
 // Best-effort, non-blocking macOS notification (used only when the gate is off and the agent has no push).
+// Set SLOPSTREAM_NOTIFY=off to silence these entirely (tests always do this; a real user can too).
 export function notify(title, text) {
-  if (process.platform !== 'darwin') return;
+  if (process.platform !== 'darwin' || process.env.SLOPSTREAM_NOTIFY === 'off') return;
   try {
     const p = spawn('osascript', ['-e', 'on run argv', '-e', 'display notification (item 1 of argv) with title (item 2 of argv)', '-e', 'end run', shorten(text).slice(0, 200), clean(title)], { stdio: 'ignore' });
     p.on('error', () => {});

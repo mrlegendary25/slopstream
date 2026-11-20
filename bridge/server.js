@@ -25,7 +25,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'node:fs';
-import { loadConfig, logLine, codexThreadFile } from './config.js';
+import { loadConfig, logLine, codexThreadFile, pausedFile } from './config.js';
 import { makeGate, notify } from './gate.js';
 
 const cfg = loadConfig();
@@ -305,4 +305,9 @@ function connect() {
 }
 
 await mcp.connect(new StdioServerTransport());
-connect();
+if (fs.existsSync(pausedFile(CHAT))) {
+  state.fatal = `PAUSED: "${CHAT}" is paused locally, so it never connects to the relay and nobody can reach it. Run: slopstream resume ${CHAT}`;
+  err(state.fatal);
+} else {
+  connect();
+}

@@ -42,7 +42,7 @@ async function startBridge(home, chat, extra = {}) {
   const pushes = [];
   const client = new Client({ name: 't', version: '0' }, { capabilities: {} });
   client.fallbackNotificationHandler = async (n) => { if (n.method === 'notifications/claude/channel') pushes.push(n.params); };
-  const env = { ...process.env, SLOPSTREAM_HOME: home, SLOPSTREAM_CHAT: chat, ...extra };
+  const env = { ...process.env, SLOPSTREAM_HOME: home, SLOPSTREAM_CHAT: chat, SLOPSTREAM_NOTIFY: 'off', ...extra };
   delete env.SLOPSTREAM_GATE_CMD; Object.assign(env, extra);
   await client.connect(new StdioClientTransport({ command: 'node', args: [path.join(ROOT, 'bridge/server.js')], env, stderr: 'ignore' }));
   const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); return { err: !!r.isError, text: r.content[0].text }; };
@@ -128,7 +128,7 @@ check('init codex: AGENTS.md rules block exactly once', (read(path.join(proj, 'A
 
 // solo demo, end to end, with two no-AI stand-ins
 const fakeHome = path.join(TMP, 'fakehome'); fs.mkdirSync(fakeHome);
-const denv = { ...process.env, HOME: fakeHome, SLOPSTREAM_GATE_CMD: 'true' }; delete denv.SLOPSTREAM_HOME;
+const denv = { ...process.env, HOME: fakeHome, SLOPSTREAM_GATE_CMD: 'true', SLOPSTREAM_NOTIFY: 'off' }; delete denv.SLOPSTREAM_HOME;
 const up = execFileSync('node', [CLI, 'demo', 'up', '--a', 'claude', '--b', 'codex', '--port', '18791'], { env: denv, encoding: 'utf8' });
 check('demo up reports ready', /DEMO READY/.test(up), up);
 check('demo up wired both folders', fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-a/.mcp.json')) && fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-b/.codex/config.toml')));
