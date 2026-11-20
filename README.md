@@ -3,16 +3,16 @@
 > ## Seamless slop grenades.
 > *Safety pin included.* (The pin is your approve button.)
 
-**Stop being the clipboard.** Slopstream links one Claude Code (or Codex) chat of yours to one chat of a friend's, so the two agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
+**Stop being the clipboard.** Slopstream links one Claude Code (or Codex) chat of yours to one (or a few) of a friend's, so the agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
 
 - A message arrives as a **new prompt in the chat that is already open**. It never starts a new chat.
 - **Both humans approve**: every outgoing message and every incoming one.
 - **Only while both are online.** Nothing is queued, so nobody's agent can get pinged at 3 a.m.
-- **One chat to one chat.** Not "anyone can message my Claude".
+- **One chat to one chat — or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
 
 What it is and why it exists: see [product.md](./product.md). This file is the how-to.
 
-> **Status.** V1. Works with **Claude Code** and **Codex**. The relay, pairing, delivery rules, approval gates and security checks are covered by automated end-to-end tests (`npm test`, 61 checks), and the Codex push was verified against a real Codex. It has **not yet been verified inside a live Claude Code session** or with the macOS pop-ups. **[TESTING.md](./TESTING.md)** walks you through that in three parts: on your own laptop, with a friend on Claude, and with a friend on Codex.
+> **Status.** V1. Works with **Claude Code** and **Codex**, and installs as a **Claude Code plugin**. The relay, pairing/invites, delivery rules, approval gates and security checks are covered by automated end-to-end tests (`npm test`), and the Codex push was verified against a real Codex. It has **not yet been verified inside a live Claude Code session** or with the macOS pop-ups. **[TESTING.md](./TESTING.md)** walks you through that in three parts: on your own laptop, with a friend on Claude, and with a friend on Codex.
 
 ---
 
@@ -124,7 +124,20 @@ Expected: `Connection to 100.101.102.103 port 8787 [tcp/*] succeeded!` If it han
 
 ## 5. Step 3: Get Slopstream (both of you)
 
-Put the project somewhere permanent. **Don't move the folder later**, because the project settings written in Step 7 contain its full path.
+Two ways to get it — pick one. Either way, **don't move it later**, because the project settings written in Step 7 contain its full path.
+
+### Option A: as a Claude Code plugin (no npm/Node setup to think about)
+
+Inside a Claude Code session:
+
+```
+/plugin marketplace add mrlegendary25/slopstream
+/plugin install slopstream@slopstream
+```
+
+This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo` as slash commands, with dependencies installed automatically on first use. Pairing (`setup`, `pair-create`, `pair-accept`, `invite`, `unlink`) still needs a real terminal on purpose (see Step 6) — run `/slopstream:get-started` for the exact commands to copy. For the relay host, the CLI is also on disk wherever the plugin installed to; `/slopstream:get-started` shows you that path too.
+
+### Option B: clone it and link the CLI yourself
 
 ```bash
 cd /Users/mrlegendary/Code/learning/products/slopstream    # Himnish: your folder
@@ -143,7 +156,7 @@ npm link
 slopstream
 ```
 
-You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`, `status`, `demo`).
+You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `invite`, `links`, `unlink`, `init`, `status`, `demo`).
 
 If you get `command not found: slopstream`:
 - If you use **nvm** and switched Node versions, run `npm link` again under the Node version you're using now.
@@ -259,11 +272,11 @@ That file (`~/.slopstream/config.json`) holds your relay address, username and t
 
 ## 8. Step 6: Pair one chat with one chat
 
-A **link** joins one of your chats to one of your friend's chats. You identify a chat by a short **label** you pick (letters, digits, `.`, `_`, `-`), for example `projX`. In practice the label stands for "the Claude Code chat I run in this project".
+A **link** joins your chat to one or more of your friends' chats, into a shared group. You identify a chat by a short **label** you pick (letters, digits, `.`, `_`, `-`), for example `projX`. In practice the label stands for "the Claude Code chat I run in this project".
 
 - Labels are yours. **Himnish's `projX` and Aarush's `projX` can be named differently**, e.g. `mine` and `theirs`.
-- One label can have **one** link.
-- Pairing is done in the terminal, **never by Claude**, and it needs **both** of you.
+- One label can have **one** link, but that link can hold more than two chats — by default up to **3** total (set `MAX_GROUP_SIZE` on the relay to change this).
+- Pairing is done in the terminal, **never by Claude**, and it needs a human on both sides.
 
 **Himnish** (creates the code):
 
@@ -298,11 +311,19 @@ Approve? [y/N]
 
 Type `y` and press Enter. Both terminals print a `Linked: ...` line (Himnish sees `Linked: projX <-> aarush/projX`; Aarush sees it from his side, `Linked: projX <-> himnish/projX`).
 
+**Adding a third person to that same link** (optional, up to `MAX_GROUP_SIZE`): either Himnish or Aarush, from their own chat, invites:
+
+```bash
+slopstream invite projX
+```
+
+This prints an invite code exactly like `pair-create` did. The third person accepts it the same way a second person would: `slopstream pair-accept <code> <their-chat-label>`, then the inviter approves. Once three chats share a link, `send_message` needs `to: "<username>"` to say who a message is for — `link_status` lists everyone currently in the group.
+
 Useful commands:
 
 ```bash
-slopstream links           # list your links
-slopstream unlink projX    # cut a link instantly, for both sides
+slopstream links           # list your links (and who else is in each group)
+slopstream unlink projX    # leave the link; it dissolves for everyone if fewer than 2 chats remain
 ```
 
 ## 9. Step 7: Turn it on in a project and use it
@@ -411,22 +432,25 @@ Setup, pairing and `init` are one-time. The relay host's Mac has to be awake and
 | `slopstream setup <relay-url> <user> <token>` | Save your login (once per Mac) |
 | `slopstream pair-create <chat> [--yes]` | Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
 | `slopstream pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
-| `slopstream links` | List your links |
-| `slopstream unlink <chat>` | Cut a link immediately, on both sides |
+| `slopstream invite <chat> [--yes]` | Add another person to a chat that's **already** linked, up to the relay's `MAX_GROUP_SIZE` |
+| `slopstream links` | List your links (and who else is in each group) |
+| `slopstream unlink <chat>` | Leave a link; it dissolves for everyone if fewer than 2 chats would remain |
 | `slopstream init <chat> [--agent claude\|codex]` | In a project folder: wire it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`) |
 | `slopstream status` | Is this Mac ready? Login, relay reachable, links and who is online, installed agents |
-| `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--port N]` | Solo test: private relay + two fake people + two project folders, on this Mac |
+| `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--c claude\|codex] [--port N]` | Solo test: private relay + two or three fake people + their project folders, on this Mac |
 | `slopstream demo status` / `demo down` | Show who is online in the demo / stop the demo relay |
-| `slopstream demo peer --side a\|b` | A no-AI stand-in for one side of the demo (type to send, see what arrives) |
+| `slopstream demo peer --side a\|b\|c` | A no-AI stand-in for one side of the demo (type to send, `@username ...` to target one peer in a group, see what arrives) |
 | `slopstream simulate --chat <chat> [--agent claude\|codex]` | The same stand-in against your real setup |
 | `node relay/admin.js add-user <name>` | **[relay host]** create a user, print the token once |
 | `node relay/admin.js list-users` / `remove-user <name>` | **[relay host]** manage users |
 | `node relay/server.js` | **[relay host]** run the relay |
-| `npm test` | Run the 61 end-to-end checks |
+| `npm test` | Run the end-to-end checks |
+
+Also installable as a Claude Code plugin (`/plugin install slopstream` — see Step 3): the safe, non-secret commands above are available as `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started`. `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` are deliberately **not** slash commands, since they carry a private token or need a human y/N decision — `/slopstream:get-started` tells you the exact terminal commands to run instead.
 
 ### What Claude can do in a linked chat
 
-Only **`send_message`** and **`link_status`** (plus **`check_inbox`** on Codex). The agent cannot pair, unlink, change who's allowed, or read your token.
+Only **`send_message`** (with an optional `to`, required once more than one person is linked) and **`link_status`** (plus **`check_inbox`** on Codex). The agent cannot pair, invite, unlink, change who's allowed, or read your token.
 
 ### Settings (environment variables)
 
@@ -438,6 +462,7 @@ Relay (set on the command line when you start it):
 | `PORT` | `8787` | Port |
 | `DATA_DIR` | `./data` | Where users, links and the audit log live. **Set it to a fixed folder** |
 | `MAX_TEXT` | `8000` | Max characters per message |
+| `MAX_GROUP_SIZE` | `3` | How many chats one link can hold (2 = classic one-to-one; raise it to allow bigger groups) |
 | `RATE_MAX` | `30` | Max messages per link per window |
 | `RATE_WINDOW_MS` | `600000` | The window (10 minutes) |
 
@@ -476,7 +501,7 @@ Bridge and CLI:
 - Wrong or missing token → rejected.
 - Text only, 8000 characters max, 30 messages per 10 minutes per link.
 - `unlink` takes effect immediately for both sides.
-- Claude has no tool that can pair, unlink or change the allowlist.
+- Claude has no tool that can pair, invite, unlink or change the allowlist.
 
 **Soft rules (depend on Claude and on you):**
 - *Incoming messages are untrusted.* Every inbound message is wrapped and labelled, characters that could forge the wrapper are neutralised, and Claude is told to show you and wait. But a language model can still be tricked by a clever prompt-injection. **Treat what the other agent says like a stranger's email.**

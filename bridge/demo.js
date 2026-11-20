@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { saveConfig, loadConfig } from './config.js';
-import { pairBoth, listLinks } from './net.js';
+import { pairBoth, inviteAndAccept, listLinks } from './net.js';
 import { runInit } from './init.js';
 import { runSimulate } from './simulate.js';
 
@@ -27,7 +27,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const paths = (dir) => ({
   dir, state: path.join(dir, 'demo.json'), relayData: path.join(dir, 'relay-data'), relayLog: path.join(dir, 'relay.log'),
-  homeA: path.join(dir, 'home-a'), homeB: path.join(dir, 'home-b'), a: path.join(dir, 'folder-a'), b: path.join(dir, 'folder-b'),
+  homeA: path.join(dir, 'home-a'), homeB: path.join(dir, 'home-b'), homeC: path.join(dir, 'home-c'),
+  a: path.join(dir, 'folder-a'), b: path.join(dir, 'folder-b'), c: path.join(dir, 'folder-c'),
 });
 const readState = (P) => { try { return JSON.parse(fs.readFileSync(P.state, 'utf8')); } catch { return null; } };
 
@@ -45,8 +46,9 @@ const launchLine = (agent, folder) => agent === 'claude'
   ? `cd ${folder} && claude --dangerously-load-development-channels server:slopstream`
   : `cd ${folder} && codex`;
 
-export async function demoUp({ dir, a = 'claude', b = 'claude', port = 18787, bin = 'slopstream' }) {
-  for (const x of [a, b]) if (!AGENTS.includes(x)) throw new Error(`agent must be "claude" or "codex" (got "${x}")`);
+export async function demoUp({ dir, a = 'claude', b = 'claude', c, port = 18787, bin = 'slopstream' }) {
+  const group = [a, b, ...(c ? [c] : [])];
+  for (const x of group) if (!AGENTS.includes(x)) throw new Error(`agent must be "claude" or "codex" (got "${x}")`);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be a number between 1024 and 65535');
   const P = paths(path.resolve(dir || defaultDir()));
   const old = readState(P);
@@ -55,7 +57,8 @@ export async function demoUp({ dir, a = 'claude', b = 'claude', port = 18787, bi
     if (fs.existsSync(path.join(P.dir, MARK))) fs.rmSync(P.dir, { recursive: true, force: true });
     else if (fs.readdirSync(P.dir).length) throw new Error(`${P.dir} already exists and is not a slopstream demo folder. Pick another with --dir.`);
   }
-  for (const p of [P.relayData, P.homeA, P.homeB, P.a, P.b]) fs.mkdirSync(p, { recursive: true });
+  const dirs = [P.relayData, P.homeA, P.homeB, P.a, P.b, ...(c ? [P.homeC, P.c] : [])];
+  for (const p of dirs) fs.mkdirSync(p, { recursive: true });
   fs.writeFileSync(path.join(P.dir, MARK), 'created by `slopstream demo`; safe to delete\n');
 
   const log = fs.openSync(P.relayLog, 'a');
@@ -82,23 +85,29 @@ export async function demoUp({ dir, a = 'claude', b = 'claude', port = 18787, bi
     await pairBoth(cfgA, CHAT, cfgB, CHAT);
     runInit({ chat: CHAT, agent: a, cwd: P.a, home: P.homeA });
     runInit({ chat: CHAT, agent: b, cwd: P.b, home: P.homeB });
-    fs.writeFileSync(P.state, JSON.stringify({ pid: relay.pid, port, a, b }, null, 2));
+    if (c) {
+      const cfgC = { relay: url, user: 'demo-c', token: token('demo-c') };
+      saveConfig(cfgC, P.homeC);
+      await inviteAndAccept(cfgA, CHAT, cfgC, CHAT);
+      runInit({ chat: CHAT, agent: c, cwd: P.c, home: P.homeC });
+    }
+    fs.writeFileSync(P.state, JSON.stringify({ pid: relay.pid, port, a, b, c: c || null }, null, 2));
   } catch (e) { try { process.kill(relay.pid); } catch {} throw e; }
 
   console.log(`
-DEMO READY. Two fake people now share this laptop, linked chat-to-chat:
+DEMO READY. ${c ? 'Three' : 'Two'} fake people now share this laptop, linked chat-to-chat:
   person A  ${a.padEnd(6)}  folder ${P.a}
-  person B  ${b.padEnd(6)}  folder ${P.b}
+  person B  ${b.padEnd(6)}  folder ${P.b}${c ? `\n  person C  ${c.padEnd(6)}  folder ${P.c}` : ''}
 The relay runs in the background (pid ${relay.pid}, port ${port}). Stop it with:  ${bin} demo down
 
-Test with no AI at all (free, tests the plumbing). Two new terminals:
+Test with no AI at all (free, tests the plumbing). ${c ? 'Three' : 'Two'} new terminals:
   ${bin} demo peer --side a
-  ${bin} demo peer --side b
-Type a line in one and press Enter; it arrives in the other.
+  ${bin} demo peer --side b${c ? `\n  ${bin} demo peer --side c` : ''}
+Type a line in one and press Enter; it arrives in the other(s).${c ? ' In a 3-way group, use "@demo-b message" / "@demo-c message" to pick a target.' : ''}
 
-Test with the real agents. Two new terminals:
+Test with the real agents. ${c ? 'Three' : 'Two'} new terminals:
   ${launchLine(a, P.a)}
-  ${launchLine(b, P.b)}
+  ${launchLine(b, P.b)}${c ? `\n  ${launchLine(c, P.c)}` : ''}
 Check who is online any time:  ${bin} demo status`);
 }
 
@@ -111,8 +120,10 @@ export async function demoStatus() {
   const cfg = loadConfig(P.homeA);
   let links;
   try { links = await listLinks(cfg); } catch { console.log('  the relay is not answering. Run `slopstream demo down` then `slopstream demo up`.'); return 1; }
+  const label = { 'demo-a': 'person A', 'demo-b': 'person B', 'demo-c': 'person C' };
   for (const l of links) {
-    console.log(`  chat "${l.a.chat}":  person A (${st.a}) ${l.online?.a ? 'ONLINE' : 'offline'}   <->   person B (${st.b}) ${l.online?.b ? 'ONLINE' : 'offline'}`);
+    const names = l.members.map(m => `${label[m.user] || m.user} (${m.user === 'demo-a' ? st.a : m.user === 'demo-b' ? st.b : st.c}) ${m.online ? 'ONLINE' : 'offline'}`);
+    console.log(`  chat "${l.members[0].chat}":  ${names.join('   <->   ')}`);
   }
   return 0;
 }
@@ -120,8 +131,9 @@ export async function demoStatus() {
 export async function demoPeer({ side, agent, linger }) {
   const P = paths(defaultDir()); const st = readState(P);
   if (!st || !alive(st.pid)) throw new Error('no demo relay is running. Run: slopstream demo up');
-  if (!['a', 'b'].includes(side)) throw new Error('--side must be a or b');
-  process.env.SLOPSTREAM_HOME = side === 'a' ? P.homeA : P.homeB;
+  const sides = st.c ? ['a', 'b', 'c'] : ['a', 'b'];
+  if (!sides.includes(side)) throw new Error(`--side must be ${sides.join(' or ')}`);
+  process.env.SLOPSTREAM_HOME = side === 'a' ? P.homeA : side === 'b' ? P.homeB : P.homeC;
   return runSimulate({ chat: CHAT, agent: agent || st[side], linger });
 }
 

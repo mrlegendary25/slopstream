@@ -48,6 +48,25 @@ export async function pairBoth(cfgA, chatA, cfgB, chatB) {
   } finally { wsA.close(); wsB.close(); }
 }
 
+// Add chatNew (cfgNew) to the EXISTING group that chatInviter (cfgInviter) already belongs to, without any
+// human prompt. Used ONLY by the local demo and tests, where all identities belong to the same person.
+export async function inviteAndAccept(cfgInviter, chatInviter, cfgNew, chatNew) {
+  const wsI = await admin(cfgInviter); const wsN = await admin(cfgNew);
+  try {
+    wsI.send(JSON.stringify({ t: 'invite_create', chat: chatInviter }));
+    const { code } = await nextMsg(wsI, ['pair_code'], 5000);
+    const reqP = nextMsg(wsI, ['pair_request'], 5000);
+    const pairedI = nextMsg(wsI, ['paired', 'pair_denied'], 5000);
+    const pairedN = nextMsg(wsN, ['paired', 'pair_denied'], 5000);
+    wsN.send(JSON.stringify({ t: 'pair_accept', code, chat: chatNew }));
+    const req = await reqP;
+    wsI.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok: true }));
+    const [a, b] = await Promise.all([pairedI, pairedN]);
+    if (a.t !== 'paired' || b.t !== 'paired') throw new Error('invite was denied');
+    return a.link;
+  } finally { wsI.close(); wsN.close(); }
+}
+
 export async function listLinks(cfg) {
   const ws = await admin(cfg);
   try { ws.send(JSON.stringify({ t: 'list_links' })); return (await nextMsg(ws, ['links'], 5000)).links; }

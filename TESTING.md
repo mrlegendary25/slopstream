@@ -35,8 +35,16 @@ Each person testing needs:
 - [ ] For Part 3: **Codex installed** (`codex --version`), a recent version — this was verified against **0.162.1**.
 - [ ] For Parts 2 and 3 only: a **Tailscale account** each (free, created in Part 2/Step 1 below). Do not share one account between two people.
 
-Install Slopstream itself (every person who will test, on their own Mac):
+Install Slopstream itself (every person who will test, on their own Mac). Two ways:
 
+**As a Claude Code plugin** (inside a Claude Code session):
+```
+/plugin marketplace add mrlegendary25/slopstream
+/plugin install slopstream@slopstream
+```
+This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started` as slash commands, with dependencies installed automatically on first use. You'll still need a real terminal for `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` (they carry a private token or need an interactive y/N) — `/slopstream:get-started` tells you the exact path to run them from.
+
+**Or clone it and link the CLI** (needed either way if you're the relay host, or you just prefer a terminal):
 ```bash
 cd /Users/mrlegendary/Code/learning/products/slopstream    # your folder (a friend: wherever they cloned/copied it)
 npm install
@@ -52,7 +60,7 @@ npm link
 slopstream
 ```
 
-You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `links`, `unlink`, `init`, `status`, `demo`).
+You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `invite`, `links`, `unlink`, `init`, `status`, `demo`).
 
 If you get `command not found: slopstream`:
 - If you use **nvm** and switched Node versions, run `npm link` again under the Node version you're using now.
@@ -172,6 +180,35 @@ cd ~/.slopstream-demo/folder-b && codex
 ```
 
 Follow the **Codex first run** steps in Part 3 below, then run the Part 3 test script table with both sides on your own Mac.
+
+## 1E. A three-person group, no AI needed (free)
+
+Proves the group feature (a link with more than 2 members, targeted `send_message`, leaving a group) before you involve a real friend.
+
+```bash
+slopstream demo down
+slopstream demo up --a claude --b claude --c claude
+```
+
+The output now lists a `person C` folder too. Open **three** new terminals:
+
+```bash
+slopstream demo peer --side a
+slopstream demo peer --side b
+slopstream demo peer --side c
+```
+
+| # | Do this | You should see |
+|---|---|---|
+| 1 | All three print `linked to ...` | A and B show each other online; C shows both A and B online (it was invited into the same link) |
+| 2 | In terminal A type `hello everyone` + Enter | **Refused**: `NOT SENT: ... more than one person is linked ... Pass "to" with the username.` Sending needs a target once there are 2+ peers |
+| 3 | In terminal A type `@demo-c hello just for you` | Terminal C gets it, framed `[UNTRUSTED message from demo-a's agent ...]`. Terminal B gets **nothing** — it was targeted, not broadcast |
+| 4 | In terminal C type `/status` | JSON `peers` array listing both demo-a and demo-b, each with their own `online` flag |
+| 5 | In terminal B type `/quit`, then in terminal A type `@demo-c still there?` | Still delivered to C (B leaving the terminal doesn't affect A↔C) |
+
+Pass = all five rows behave as described. Clean up the same way as Part 1 (`slopstream demo down`).
+
+To test the group size cap: the default `MAX_GROUP_SIZE` is 3, so a 4th `slopstream invite`/`pair-accept` on this same chat should be refused with `group_full` — there's no demo flag for a 4th fake person, but this exact scenario is covered by `npm test` (see `test/group.js`).
 
 ## Cleaning up Part 1
 
@@ -561,7 +598,7 @@ Worth knowing while you test, especially for the injection-style rows above.
 - Wrong or missing token → rejected.
 - Text only, 8000 characters max, 30 messages per 10 minutes per link.
 - `unlink` takes effect immediately for both sides.
-- Claude has no tool that can pair, unlink or change the allowlist.
+- Claude has no tool that can pair, invite, unlink or change the allowlist.
 
 **Soft rules (depend on Claude and on you):**
 - *Incoming messages are untrusted.* Every inbound message is wrapped and labelled, characters that could forge the wrapper are neutralised, and Claude is told to show you and wait. But a language model can still be tricked by a clever prompt-injection. **Treat what the other agent says like a stranger's email.**
@@ -655,22 +692,25 @@ Relay host: stop the relay (Ctrl+C in its window) and optionally `rm -rf ~/.slop
 | `slopstream setup <relay-url> <user> <token>` | Save your login (once per Mac) |
 | `slopstream pair-create <chat> [--yes]` | Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
 | `slopstream pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
-| `slopstream links` | List your links |
-| `slopstream unlink <chat>` | Cut a link immediately, on both sides |
+| `slopstream invite <chat> [--yes]` | Add another person to a chat that's **already** linked, up to the relay's `MAX_GROUP_SIZE` |
+| `slopstream links` | List your links (and who else is in each group) |
+| `slopstream unlink <chat>` | Leave a link; it dissolves for everyone if fewer than 2 chats would remain |
 | `slopstream init <chat> [--agent claude\|codex]` | In a project folder: wire it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`) |
 | `slopstream status` | Is this Mac ready? Login, relay reachable, links and who is online, installed agents |
-| `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--port N]` | Solo test: private relay + two fake people + two project folders, on this Mac |
+| `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--c claude\|codex] [--port N]` | Solo test: private relay + two or three fake people + their project folders, on this Mac |
 | `slopstream demo status` / `demo down` | Show who is online in the demo / stop the demo relay |
-| `slopstream demo peer --side a\|b` | A no-AI stand-in for one side of the demo (type to send, see what arrives) |
+| `slopstream demo peer --side a\|b\|c` | A no-AI stand-in for one side of the demo (type to send, `@username ...` to target one peer in a group, see what arrives) |
 | `slopstream simulate --chat <chat> [--agent claude\|codex]` | The same stand-in against your real setup |
 | `node relay/admin.js add-user <name>` | **[relay host]** create a user, print the token once |
 | `node relay/admin.js list-users` / `remove-user <name>` | **[relay host]** manage users |
 | `node relay/server.js` | **[relay host]** run the relay |
 | `npm test` | Run the automated end-to-end checks |
 
+Also installable as a Claude Code plugin (see Part 0): `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo`, `/slopstream:get-started`. Not `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` — those carry a token or need a human y/N, so they stay terminal-only.
+
 ## What Claude/Codex can do in a linked chat
 
-Only **`send_message`** and **`link_status`** (plus **`check_inbox`** on Codex). The agent cannot pair, unlink, change who's allowed, or read your token.
+Only **`send_message`** (with an optional `to`, required once more than one person is linked) and **`link_status`** (plus **`check_inbox`** on Codex). The agent cannot pair, invite, unlink, change who's allowed, or read your token.
 
 ## Settings (environment variables)
 
@@ -682,6 +722,7 @@ Relay (set on the command line when you start it):
 | `PORT` | `8787` | Port |
 | `DATA_DIR` | `./data` | Where users, links and the audit log live. **Set it to a fixed folder** |
 | `MAX_TEXT` | `8000` | Max characters per message |
+| `MAX_GROUP_SIZE` | `3` | How many chats one link can hold (2 = classic one-to-one) |
 | `RATE_MAX` | `30` | Max messages per link per window |
 | `RATE_WINDOW_MS` | `600000` | The window (10 minutes) |
 

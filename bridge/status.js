@@ -36,9 +36,10 @@ export async function runStatus() {
       const r = await nextMsg(ws, ['links']);
       if (!r.links.length) line(null, 'no links yet. Pair a chat with: slopstream pair-create <chat>');
       for (const l of r.links) {
-        const meIsA = l.a.user === cfg.user; const me = meIsA ? l.a : l.b; const peer = meIsA ? l.b : l.a;
-        const meOn = meIsA ? l.online?.a : l.online?.b; const peerOn = meIsA ? l.online?.b : l.online?.a;
-        console.log(`  • ${me.chat}  <->  ${peer.user}/${peer.chat}     your session: ${meOn ? 'online' : 'offline'}   their session: ${peerOn ? 'online' : 'offline'}`);
+        const mine = l.members.find(m => m.user === cfg.user);
+        const others = l.members.filter(m => m !== mine);
+        const peers = others.map(o => `${o.user}/${o.chat} (${o.online ? 'online' : 'offline'})`).join(', ');
+        console.log(`  • ${mine.chat}  <->  ${peers}     your session: ${mine.online ? 'online' : 'offline'}`);
       }
     } catch (e) { line(false, `could not list links: ${e.message}`); bad = true; }
     try { ws.close(); } catch {}

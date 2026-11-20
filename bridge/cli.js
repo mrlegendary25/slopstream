@@ -15,7 +15,7 @@ import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 const args = process.argv.slice(2);
 const yes = args.includes('--yes');
 const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined; };
-const optVals = new Set(['agent', 'chat', 'home', 'a', 'b', 'port', 'dir', 'side', 'linger'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
+const optVals = new Set(['agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
 const pos = args.filter((a, i) => !a.startsWith('--') && !optVals.has(i));
 const [cmd, ...rest] = pos;
 const die = (m) => { console.error(m); process.exit(1); };
@@ -45,7 +45,22 @@ async function main() {
       const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
       const r = await nextMsg(ws, ['paired', 'pair_denied']);
-      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.peer.user}/${r.peer.chat}` : 'Denied.');
+      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
+      ws.close(); break;
+    }
+    case 'invite': {
+      // Add a new person to a chat that is ALREADY linked (group grows up to the relay's MAX_GROUP_SIZE).
+      const chat = rest[0]; if (!chat) die('usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)');
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'invite_create', chat }));
+      const c = await nextMsg(ws, ['pair_code']);
+      console.log(`\nInvite code for chat "${chat}":  ${c.code}   (valid ${c.expiresInSec / 60} min)\nGive it to the new person. They run:  slopstream pair-accept ${c.code} <their-chat-label>\nWaiting...`);
+      const req = await nextMsg(ws, ['pair_request']);
+      console.log(`\n${req.from.user} wants to join "${chat}" (their chat label: "${req.from.chat}").`);
+      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
+      const r = await nextMsg(ws, ['paired', 'pair_denied']);
+      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
       ws.close(); break;
     }
     case 'pair-accept': {
@@ -54,7 +69,7 @@ async function main() {
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
       const w = await nextMsg(ws, ['pair_waiting']); console.log(w.message);
       const r = await nextMsg(ws, ['paired', 'pair_denied']);
-      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.peer.user}/${r.peer.chat}` : 'Denied by the other side.');
+      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied by the other side.');
       ws.close(); break;
     }
     case 'links': {
@@ -63,8 +78,10 @@ async function main() {
       const r = await nextMsg(ws, ['links']);
       if (!r.links.length) console.log('(no links)');
       for (const l of r.links) {
-        const me = l.a.user === cfg.user ? l.a : l.b; const peer = me === l.a ? l.b : l.a;
-        console.log(`${me.chat}  <->  ${peer.user}/${peer.chat}   (since ${l.createdAt})`);
+        const mine = l.members.find(m => m.user === cfg.user);
+        const others = l.members.filter(m => m !== mine);
+        const peers = others.map(o => `${o.user}/${o.chat}${o.online ? ' (online)' : ''}`).join(', ');
+        console.log(`${mine.chat}  <->  ${peers}   (since ${l.createdAt})`);
       }
       ws.close(); break;
     }
@@ -107,11 +124,11 @@ async function main() {
     }
     case 'demo': {
       const sub = rest[0];
-      if (sub === 'up') await demoUp({ dir: opt('dir'), a: opt('a') || 'claude', b: opt('b') || 'claude', port: opt('port') ? Number(opt('port')) : 18787 });
+      if (sub === 'up') await demoUp({ dir: opt('dir'), a: opt('a') || 'claude', b: opt('b') || 'claude', c: opt('c'), port: opt('port') ? Number(opt('port')) : 18787 });
       else if (sub === 'status') process.exitCode = await demoStatus();
       else if (sub === 'down') demoDown();
       else if (sub === 'peer') { await demoPeer({ side: opt('side'), agent: opt('agent'), linger: opt('linger') !== undefined ? Number(opt('linger')) : undefined }); return new Promise(() => {}); }
-      else die('usage: slopstream demo up [--a claude|codex] [--b claude|codex] [--port N]\n       slopstream demo status | down\n       slopstream demo peer --side a|b');
+      else die('usage: slopstream demo up [--a claude|codex] [--b claude|codex] [--c claude|codex] [--port N]\n       slopstream demo status | down\n       slopstream demo peer --side a|b|c');
       break;
     }
     default:
@@ -121,8 +138,9 @@ usage: slopstream <command>
   setup <relay-url> <user> <token>   save credentials (once per machine)
   pair-create <chat> [--yes]         make a pairing code for a chat, wait for friend, approve
   pair-accept <code> <chat>          accept a friend's code for one of your chats
-  links                              list your links
-  unlink <chat>                      cut a link immediately
+  invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)
+  links                              list your links (and who else is in each group)
+  unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
   demo up|status|peer|down           test everything on THIS laptop alone (see TESTING.md)

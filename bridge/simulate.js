@@ -31,7 +31,7 @@ export async function runSimulate({ chat, agent = 'claude', linger }) {
 
   const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }); return { err: !!r.isError, text: r.content?.[0]?.text ?? '' }; };
   out(`simulating a ${agent} agent on chat "${chat}" (${push ? 'messages are pushed in' : 'approved messages wait in the inbox; this simulator checks it every second'}).`);
-  out('type a message and press Enter to send it.  /status  /inbox  /quit\n');
+  out('type a message and press Enter to send it (use "@username message" to target one peer in a group).  /status  /inbox  /quit\n');
 
   let poll = null;
   if (!push) {
@@ -63,7 +63,10 @@ export async function runSimulate({ chat, agent = 'claude', linger }) {
       if (t === '/quit' || t === '/exit') return finish();
       if (t === '/status') { out((await call('link_status')).text); return; }
       if (t === '/inbox') { if (push) out('(this agent is push-based; there is no inbox)'); else out((await call('check_inbox')).text); return; }
-      const r = await call('send_message', { text: t, ...(lastThread ? { thread_id: lastThread } : {}) });
+      let to, body = t;
+      const m = t.match(/^@(\S+)\s+([\s\S]+)$/);
+      if (m) { to = m[1]; body = m[2]; }
+      const r = await call('send_message', { text: body, ...(to ? { to } : {}), ...(lastThread ? { thread_id: lastThread } : {}) });
       out(`--> ${r.err ? 'NOT SENT: ' : ''}${r.text}`);
     });
   });

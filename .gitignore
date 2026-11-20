@@ -2,3 +2,10 @@ node_modules/
 data/
 .DS_Store
 *.log
+
+# If this repo's own root is ever used as a test project folder (e.g. `slopstream init` run
+# here by mistake), never let that local wiring get committed and ship as part of the plugin.
+/.mcp.json
+/CLAUDE.md
+/.codex/
+/AGENTS.md

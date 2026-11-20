@@ -49,7 +49,7 @@ The result: two contexts that stay separate and correct, joined by a thin, contr
 
 These were decided up front and every feature is held to them.
 
-1. **One chat to one chat.** A link joins a specific chat on your side to a specific chat on theirs, so the context is right. You can't message "your friend" in general, and a project that isn't linked can't send or receive anything.
+1. **One chat to one chat — or a small, explicit group.** A link joins specific chats together, so the context is right. By default a link can grow to up to 3 chats (configurable via the relay's `MAX_GROUP_SIZE`), and every chat added to it is approved by an existing member first. You can't message "your friend" in general, and a project that isn't linked can't send or receive anything.
 2. **Humans approve, both directions.** Outgoing messages need your approval. Incoming messages are shown to you first. The agent doesn't act on a friend's agent's say-so.
 3. **Both must be online.** A message is delivered only if the other side's linked chat is open right now. Nothing is queued, so nobody's agent gets poked at 3 a.m. to hand over a file.
 4. **Arrives in the current chat, as a new prompt.** Never a new chat, never a side channel. The conversation stays where the context already is.
@@ -107,27 +107,29 @@ The main risk is **prompt injection**: text from another agent entering your age
 
 ## 8. Where it stands (V1)
 
-**Works today** (covered by 61 automated end-to-end checks):
+**Works today** (covered by automated end-to-end checks):
 - Claude Code to Claude Code, on macOS
 - **Codex** on either side: Claude to Codex, Codex to Claude, Codex to Codex. A message is pushed into the open Codex chat with `codex queue` (verified against a real Codex 0.162.1), behind a hard approval pop-up, with an inbox fallback
-- A one-command **solo test mode** (`slopstream demo`) so one person can test both sides on one Mac
-- One link per labelled chat, human-approved pairing, human-approved messages
-- Online-only delivery, rate limit, size cap, audit log, instant unlink
-- Relay run by one of the two friends over Tailscale
+- A one-command **solo test mode** (`slopstream demo`) so one person can test two or three sides on one Mac
+- **Small groups, not just pairs**: a link can grow to up to `MAX_GROUP_SIZE` chats (default 3) via `slopstream invite`, each addition approved by an existing member. `send_message` takes an optional `to` once more than one peer is linked
+- Human-approved pairing and invites, human-approved messages
+- Online-only delivery, rate limit, size cap, audit log, instant leave/unlink
+- Relay run by one of the friends over Tailscale
+- **Installable as a Claude Code plugin** (`/plugin install slopstream`), bundling the CLI's safe, non-secret commands as slash commands; pairing/setup still happen in a terminal on purpose
 
 **Not yet:**
 - Verified in a **live** Claude Code session or with the real macOS pop-ups (TESTING.md walks through it)
 - Agents other than Claude Code and Codex
-- A hosted relay, end-to-end encryption, full A2A, teams
+- A hosted relay, end-to-end encryption, full A2A, teams-scale groups
 
 ## 9. Roadmap
 
 | Version | Goal | Highlights |
 |---|---|---|
-| **V1** (now) | Two friends, Claude Code, one pair of chats | Everything above; prove the flow in a real session |
-| **V2** | Something you can give to a stranger | Hosted relay, **end-to-end encryption**, proper presence, full **A2A** message framing, a packaged Claude Code plugin with an in-app `/link` flow |
+| **V1** (now) | Friends, Claude Code, small groups of linked chats | Everything above; prove the flow in a real session |
+| **V2** | Something you can give to a stranger | Hosted relay, **end-to-end encryption**, proper presence, full **A2A** message framing. **Claude Code plugin shipped early in V1.x**; next is an in-app `/link` flow that drives pairing without a terminal |
 | **V3** | More agents | **Codex shipped early in V1.x.** More adapters (Gemini CLI, Cursor, and others). Outbound is easy because they support MCP. Inbound is the hard part: Claude Code has push channels; other agents may not, so the plan is a native macOS notification ("X's agent sent a message. Approve?") plus an inbox the agent can read. Also per-link policies (allowed message types, no attachments, turn limits) |
-| **V4** | Teams | Many-to-many links, discovery, shared policies, audit for organisations |
+| **V4** | Teams | Groups beyond `MAX_GROUP_SIZE`, discovery, shared policies, audit for organisations |
 
 The design keeps **only the last hop** (getting a message into a running session) specific to each agent. Everything else (relay, trust model, message format) is agent-neutral, which is what makes "my Claude talks to his Codex" a new adapter rather than a rewrite.
 
