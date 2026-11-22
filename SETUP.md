@@ -1,6 +1,8 @@
 # Setup (fast path)
 
-Minimum commands to get linked. No explanations, no optional steps — if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires macOS, Node 20+, Claude Code ≥2.1.80.
+*Part of [Slopstream](./README.md) · [Product overview](./product.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
+
+Minimum commands to get linked. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires macOS, Node 20+, Claude Code ≥2.1.80.
 
 One person is the **host** (runs the relay). Everyone else is a **joiner**. Do Part 1 as everyone, then Part 2 (host) or Part 3 (joiner) as your role.
 
@@ -18,13 +20,13 @@ One person is the **host** (runs the relay). Everyone else is a **joiner**. Do P
 
 ## 2. Host
 
-Get Slopstream — pick one:
+Get Slopstream, pick one:
 
 ```bash
 # Option A: Claude Code plugin (run inside a Claude Code session, then in a terminal)
 /plugin marketplace add mrlegendary25/slopstream
 /plugin install slopstream@slopstream
-# run /slopstream:get-started in that session — it prints the install path. Then, in a terminal:
+# run /slopstream:get-started in that session (it prints the install path). Then, in a terminal:
 cd <path-it-printed> && npm install && npm link
 ```
 ```bash
@@ -39,7 +41,7 @@ DATA_DIR=~/.slopstream-relay node relay/admin.js add-user <you>
 DATA_DIR=~/.slopstream-relay node relay/admin.js add-user <joiner>   # repeat per joiner
 HOST=<your-tailscale-ip> DATA_DIR=~/.slopstream-relay caffeinate -i node relay/server.js
 ```
-(leave that running — open a new terminal for the rest)
+(leave that running; open a new terminal for the rest)
 
 ```bash
 slopstream setup ws://<your-tailscale-ip>:8787 <you> <your-token>
@@ -59,13 +61,13 @@ claude --dangerously-load-development-channels server:slopstream
 
 Accept the Tailscale invite link the host sent you.
 
-Get Slopstream — pick one:
+Get Slopstream, pick one:
 
 ```bash
 # Option A: Claude Code plugin (run inside a Claude Code session, then in a terminal)
 /plugin marketplace add mrlegendary25/slopstream
 /plugin install slopstream@slopstream
-# run /slopstream:get-started in that session — it prints the install path. Then, in a terminal:
+# run /slopstream:get-started in that session (it prints the install path). Then, in a terminal:
 cd <path-it-printed> && npm install && npm link
 ```
 ```bash
@@ -94,15 +96,15 @@ claude --dangerously-load-development-channels server:slopstream
 
 ## 4. Stop / unlink / delete
 
-Pick what you actually need — these stack, top to bottom.
+Pick what you actually need: these stack, top to bottom.
 
-**Stop being reachable on `projX` for now, keep the link** (anyone — host or joiner):
+**Stop being reachable on `projX` for now, keep the link** (anyone, host or joiner):
 ```bash
 slopstream pause projX     # undo with: slopstream resume projX
 ```
 Restart Claude/Codex in that folder for it to take effect.
 
-**Leave the link entirely** (anyone — host or joiner; dissolves it for everyone once fewer than 2 chats remain):
+**Leave the link entirely** (anyone, host or joiner; dissolves it for everyone once fewer than 2 chats remain):
 ```bash
 slopstream unlink projX
 ```
@@ -113,9 +115,13 @@ rm -rf ~/.slopstream
 npm unlink -g slopstream
 ```
 
-**Host only — also stop/delete the relay:**
+**Host only, also stop/delete the relay:**
 ```bash
 # Ctrl+C in the terminal running relay/server.js, then:
 rm -rf ~/.slopstream-relay
 ```
 Also remove the Tailscale share from <https://console.tailscale.com/admin/machines> if you no longer want that joiner reaching this machine.
+
+---
+
+*Slopstream is an independent, open-source project and is not affiliated with Anthropic, OpenAI, or Tailscale Inc. See the [README](./README.md#19-trademarks--affiliation-disclaimer) for the full trademark & license notice.*

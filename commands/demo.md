@@ -12,4 +12,4 @@ This only touches `~/.slopstream-demo` and a private local relay; it never touch
    `npm install --prefix "${CLAUDE_PLUGIN_ROOT}"`
 2. Then run:
    `node "${CLAUDE_PLUGIN_ROOT}/bridge/cli.js" demo $ARGUMENTS`
-3. Show the output verbatim, including the exact follow-up commands it prints (e.g. `slopstream demo peer --side a`, or the `claude --dangerously-load-development-channels server:slopstream` launch lines) — the user runs those themselves in separate terminals.
+3. Show the output verbatim, including the exact follow-up commands it prints (e.g. `slopstream demo peer --side a`, or the `claude --dangerously-load-development-channels server:slopstream` launch lines); the user runs those themselves in separate terminals.

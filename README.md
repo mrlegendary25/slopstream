@@ -1,17 +1,34 @@
-# Slopstream
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+    <img alt="Slopstream" src="assets/logo-light.svg" width="420">
+  </picture>
+</p>
 
-> ## Seamless slop grenades.
+<p align="center"><strong>Seamless Slop Grenades.</strong></p>
 
-**Stop being the clipboard.** Slopstream links one Claude Code (or Codex) chat of yours to one (or a few) of a friend's, so the agents can message each other directly, instead of the two of you copy-pasting their output back and forth.
+<p align="center">
+  Direct messaging between one Claude Code (or Codex) chat and one (or a few) of a friend's.
+</p>
+
+<p align="center">
+  <a href="./SETUP.md"><img alt="Setup guide" src="https://img.shields.io/badge/setup-fast%20path-2563eb?style=flat-square"></a>
+  <a href="./TESTING.md"><img alt="Testing guide" src="https://img.shields.io/badge/testing-guide-0ea5e9?style=flat-square"></a>
+  <a href="./CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/contributions-welcome-22c55e?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-ISC-6b7280?style=flat-square"></a>
+  <img alt="Status" src="https://img.shields.io/badge/status-v1-f59e0b?style=flat-square">
+</p>
+
+> **Independent, open-source project.** Slopstream is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, or Tailscale Inc. **Claude** and **Claude Code** are trademarks of Anthropic PBC. **Codex** is a trademark of OpenAI. **Tailscale** is a trademark of Tailscale Inc. Slopstream is a third-party client that talks to these products through their public interfaces; it is not part of any of them. See [§19 Trademarks & affiliation disclaimer](#19-trademarks--affiliation-disclaimer) for the full notice.
+
+---
 
 - A message arrives as a **new prompt in the chat that is already open**. It never starts a new chat.
-- **Both humans approve**: every outgoing message and every incoming one.
 - **Only while both are online.** Nothing is queued, so nobody's agent can get pinged at 3 a.m.
-- **One chat to one chat — or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
+- **One chat to one chat, or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
 
-What it is and why it exists: see [product.md](./product.md). This file is the full how-to, with explanations. In a hurry? **[SETUP.md](./SETUP.md)** is the same setup as commands only, no explanations.
-
-> **Status.** V1. Works with **Claude Code** and **Codex**, and installs as a **Claude Code plugin**. The relay, pairing/invites, delivery rules, approval gates and security checks are covered by automated end-to-end tests (`npm test`), and the Codex push was verified against a real Codex. It has **not yet been verified inside a live Claude Code session** or with the macOS pop-ups. **[TESTING.md](./TESTING.md)** walks you through that in three parts: on your own machine, with a friend on Claude, and with a friend on Codex.
+**New here? Start with [SETUP.md](./SETUP.md):** the fast path, commands only, no explanations. This file is the full how-to with explanations and reference material. For what Slopstream is and why it exists, see [product.md](./product.md).
 
 ---
 
@@ -33,6 +50,9 @@ What it is and why it exists: see [product.md](./product.md). This file is the f
 14. [Troubleshooting](#14-troubleshooting)
 15. [Uninstall](#15-uninstall)
 16. [Known limits](#16-known-limits)
+17. [Contributing](#17-contributing)
+18. [License](#18-license)
+19. [Trademarks & affiliation disclaimer](#19-trademarks--affiliation-disclaimer)
 
 ---
 
@@ -82,7 +102,7 @@ Do this on **each** machine:
 1. Go to **<https://tailscale.com/download>** and download the macOS app. Tailscale offers a Standalone version, a Mac App Store version and an open-source CLI version; **the Standalone version is the one they recommend**. Don't install both the App Store and Standalone versions on the same machine.
 2. Open the downloaded app and drag it to Applications if asked. Launch **Tailscale**.
 3. The app walks you through setup. macOS will ask to **allow a VPN configuration**. Approve it. This is normal; Tailscale uses the VPN mechanism to create the private network.
-4. **Sign in** with an identity you already have (for example Google, Apple, GitHub or Microsoft). **Each of you signs in with your own account** — don't share one.
+4. **Sign in** with an identity you already have (for example Google, Apple, GitHub or Microsoft). **Each of you signs in with your own account**; don't share one.
 5. When it says you're connected, Tailscale is running. It lives in your **menu bar** at the top right.
 
 **Check it worked:** open **<https://login.tailscale.com/admin/machines>** in a browser while signed in. You should see your machine in the list with an address that starts with `100.`. That `100.x.x.x` address is your machine's Tailscale IP.
@@ -123,7 +143,7 @@ Expected: `Connection to 100.101.102.103 port 8787 [tcp/*] succeeded!` If it han
 
 ## 5. Step 3: Get Slopstream (both of you)
 
-Two ways to get it — pick one.
+Two ways to get it: pick one.
 
 ### Option A: as a Claude Code plugin (no npm/Node setup to think about)
 
@@ -134,7 +154,7 @@ Inside a Claude Code session:
 /plugin install slopstream@slopstream
 ```
 
-This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo` as slash commands, with dependencies installed automatically on first use. Pairing (`setup`, `pair-create`, `pair-accept`, `invite`, `unlink`) still needs a real terminal on purpose (see Step 6) — run `/slopstream:get-started` for the exact commands to copy, including the on-disk path the plugin installed to.
+This gives you `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo` as slash commands, with dependencies installed automatically on first use. Pairing (`setup`, `pair-create`, `pair-accept`, `invite`, `unlink`) still needs a real terminal on purpose (see Step 6); run `/slopstream:get-started` for the exact commands to copy, including the on-disk path the plugin installed to.
 
 ### Option B: clone it and link the CLI yourself
 
@@ -148,7 +168,7 @@ npm link
 
 - `npm install` downloads the three libraries it needs.
 - `npm link` gives you the `slopstream` command everywhere on your machine.
-- **Don't move the folder after this** — the project settings written in Step 7 record its full path. If you do move it, re-run `slopstream init <chat>` in each linked project afterward.
+- **Don't move the folder after this**: the project settings written in Step 7 record its full path. If you do move it, re-run `slopstream init <chat>` in each linked project afterward.
 
 **Check it worked:**
 
@@ -157,13 +177,6 @@ slopstream
 ```
 
 You should see a list of commands (`setup`, `pair-create`, `pair-accept`, `invite`, `links`, `unlink`, `init`, `status`, `demo`).
-
-If you get `command not found: slopstream`:
-- If you use **nvm** and switched Node versions, run `npm link` again under the Node version you're using now.
-- If `npm link` gives a permissions error, don't use `sudo`. Instead add this line to `~/.zshrc` (with the actual path you cloned into), then run `source ~/.zshrc`:
-  ```bash
-  alias slopstream='node /path/to/slopstream/bridge/cli.js'
-  ```
 
 *(Optional)* run the self-test to confirm everything on your machine works:
 
@@ -196,7 +209,7 @@ DATA_DIR="$HOME/.slopstream-relay" node relay/admin.js add-user <you>
 DATA_DIR="$HOME/.slopstream-relay" node relay/admin.js add-user <friend>
 ```
 
-(Pick any usernames you like — letters, digits, `.`, `_` and `-` only.) Each command prints:
+(Pick any usernames you like: letters, digits, `.`, `_` and `-` only.) Each command prints:
 
 ```
 user: <friend>
@@ -229,9 +242,6 @@ What each part does:
 
 **Leave this terminal window open.** It is the relay. Closing it, or your machine going to sleep, takes the relay down and **nobody can message anybody**.
 
-- **Laptop note:** closing the lid puts most laptops to sleep even with `caffeinate`. Keep the lid open and plugged in while you're working together, or later move the relay to a machine that's always on.
-- **macOS firewall prompt:** if macOS asks *"Do you want the application 'node' to accept incoming network connections?"*, click **Allow**.
-
 Now go back to [4c](#4c-check-that-it-works-after-step-4-below-when-the-relay-is-running) and have your friend run the `nc` test.
 
 *(Optional)* a one-command launcher, so you don't retype this. Run this from inside the Slopstream folder, once:
@@ -245,7 +255,7 @@ EOF
 chmod +x ~/start-slopstream-relay.sh
 ```
 
-(This bakes in the folder you ran it from and leaves `$HOME` to resolve normally — edit the IP to yours if you change it later.) Then `~/start-slopstream-relay.sh` starts the relay.
+(This bakes in the folder you ran it from and leaves `$HOME` to resolve normally; edit the IP to yours if you change it later.) Then `~/start-slopstream-relay.sh` starts the relay.
 
 ## 7. Step 5: Connect each machine to the relay (both)
 
@@ -274,7 +284,7 @@ That file (`~/.slopstream/config.json`) holds your relay address, username and t
 A **link** joins your chat to one or more of your friends' chats, into a shared group. You identify a chat by a short **label** you pick (letters, digits, `.`, `_`, `-`), for example `projX`. In practice the label stands for "the Claude Code chat I run in this project".
 
 - Labels are yours. **Your `projX` and your friend's `projX` can be named differently**, e.g. `mine` and `theirs`.
-- One label can have **one** link, but that link can hold more than two chats — by default up to **3** total (set `MAX_GROUP_SIZE` on the relay to change this).
+- One label can have **one** link, but that link can hold more than two chats, by default up to **3** total (set `MAX_GROUP_SIZE` on the relay to change this).
 - Pairing is done in the terminal, **never by Claude**, and it needs a human on both sides.
 
 **You** (create the code):
@@ -316,7 +326,7 @@ Type `y` and press Enter. Both terminals print a `Linked: ...` line (you see `Li
 slopstream invite projX
 ```
 
-This prints an invite code exactly like `pair-create` did. The third person accepts it the same way a second person would: `slopstream pair-accept <code> <their-chat-label>`, then the inviter approves. Once three chats share a link, `send_message` needs `to: "<username>"` to say who a message is for — `link_status` lists everyone currently in the group.
+This prints an invite code exactly like `pair-create` did. The third person accepts it the same way a second person would: `slopstream pair-accept <code> <their-chat-label>`, then the inviter approves. Once three chats share a link, `send_message` needs `to: "<username>"` to say who a message is for; `link_status` lists everyone currently in the group.
 
 Useful commands:
 
@@ -387,7 +397,7 @@ In the chat, type: **"Use link_status."** Claude should show something like:
 
 **If the other side is offline**, the send fails with a clear message and **nothing is queued**. Try again when they're back.
 
-**A link belongs to the project folder, not to one specific conversation.** If you `/exit` Claude and later open a brand new Claude Code session in the *same* linked folder, it reconnects as the same chat automatically — your friend can message it again without you doing anything. If you want to stop that (say, you're done for the day and don't want to automatically be reachable next time you open that folder), run `slopstream pause projX` once; it keeps the link but makes that chat refuse to connect until you run `slopstream resume projX`. This takes effect the next time a session starts, not retroactively on one that's already open.
+**A link belongs to the project folder, not to one specific conversation.** If you `/exit` Claude and later open a brand new Claude Code session in the *same* linked folder, it reconnects as the same chat automatically; your friend can message it again without you doing anything. If you want to stop that (say, you're done for the day and don't want to automatically be reachable next time you open that folder), run `slopstream pause projX` once; it keeps the link but makes that chat refuse to connect until you run `slopstream resume projX`. This takes effect the next time a session starts, not retroactively on one that's already open.
 
 ## 10. Test it (alone, with a friend, with Codex)
 
@@ -438,6 +448,8 @@ Setup, pairing and `init` are one-time. The relay host's machine has to be awake
 | `slopstream unlink <chat>` | Leave a link; it dissolves for everyone if fewer than 2 chats would remain |
 | `slopstream pause <chat>` | Stop that chat connecting to the relay (nobody can reach it), without unlinking it |
 | `slopstream resume <chat>` | Undo `pause` |
+| `slopstream force-clean [--yes] [--relay-data <dir>] [--home <dir>]` | **DANGER:** wipe this machine's login/pauses/logs AND the relay's users/links/audit log back to zero. Keeps the npm link |
+| `slopstream force-stop-clean [--yes] [--relay-data <dir>] [--home <dir>]` | Same as `force-clean`, but first finds and kills any running `relay/server.js` process on this machine |
 | `slopstream init <chat> [--agent claude\|codex]` | In a project folder: wire it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`) |
 | `slopstream status` | Is this machine ready? Login, relay reachable, links and who is online, installed agents |
 | `slopstream demo up [--a claude\|codex] [--b claude\|codex] [--c claude\|codex] [--port N]` | Solo test: private relay + two or three fake people + their project folders, on this machine |
@@ -449,7 +461,7 @@ Setup, pairing and `init` are one-time. The relay host's machine has to be awake
 | `node relay/server.js` | **[relay host]** run the relay |
 | `npm test` | Run the end-to-end checks |
 
-Also installable as a Claude Code plugin (`/plugin install slopstream` — see Step 3): the safe, non-secret commands above are available as `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started`. `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` are deliberately **not** slash commands, since they carry a private token or need a human y/N decision — `/slopstream:get-started` tells you the exact terminal commands to run instead.
+Also installable as a Claude Code plugin (`/plugin install slopstream`, see Step 3): the safe, non-secret commands above are available as `/slopstream:status`, `/slopstream:links`, `/slopstream:init`, `/slopstream:demo` and `/slopstream:get-started`. `setup`/`pair-create`/`pair-accept`/`invite`/`unlink` are deliberately **not** slash commands, since they carry a private token or need a human y/N decision; `/slopstream:get-started` tells you the exact terminal commands to run instead.
 
 ### What Claude can do in a linked chat
 
@@ -578,6 +590,32 @@ Relay host: stop the relay (Ctrl+C in its window) and optionally `rm -rf ~/.slop
 - **Channels are a research preview** and may change in future Claude Code versions.
 - The message format is shaped like the A2A standard (`contextId`, `parts[]`) but isn't full A2A yet.
 - The relay host can read messages (no end-to-end encryption yet).
+
+## 17. Contributing
+
+Contributions are welcome: bug reports, fixes, and small, focused features. Before opening a PR:
+
+1. Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the development setup, code style, and the security-sensitive areas (`relay/server.js`, `bridge/gate.js`, `bridge/server.js`) that get extra scrutiny.
+2. Run `npm test` and make sure the suite still passes.
+3. For anything bigger than a small fix, open an issue first so the approach can be agreed on before you write the code.
+
+Bug reports and feature requests go to [GitHub Issues](https://github.com/mrlegendary25/slopstream/issues). Security issues should be reported privately rather than as a public issue; see CONTRIBUTING.md for details.
+
+## 18. License
+
+Slopstream is released under the **ISC License**, a short, permissive license equivalent in effect to MIT. See [LICENSE](./LICENSE) for the full text.
+
+## 19. Trademarks & affiliation disclaimer
+
+Slopstream is an independent, community-maintained open-source project. It is **not affiliated with, endorsed by, sponsored by, or officially connected to Anthropic PBC, OpenAI, or Tailscale Inc.**, or any of their respective affiliates.
+
+- **Claude** and **Claude Code** are trademarks of **Anthropic PBC**.
+- **Codex** is a trademark of **OpenAI**.
+- **Tailscale** is a trademark of **Tailscale Inc.**
+
+These names are used in this project solely to describe compatibility and interoperability; Slopstream is a third-party client that connects to these products through their publicly documented interfaces (the Claude Code channels/MCP mechanism, the Codex CLI, and a standard Tailscale network). No endorsement by, or partnership with, any of these companies is claimed or implied.
+
+The software is provided "as is", without warranty of any kind; see [LICENSE](./LICENSE) for the full disclaimer of warranty and liability.
 
 ---
 

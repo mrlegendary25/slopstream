@@ -1,8 +1,8 @@
 # Slopstream: product overview
 
-> ## Seamless slop grenades.
+*Part of [Slopstream](./README.md) · [Setup (fast path)](./SETUP.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
 
-For how to set it up, see [README.md](./README.md). This file explains what it is, why it exists, and where it's going.
+Slopstream is a direct, human-approved messaging channel between Claude Code (and Codex) chats. For how to set it up, see [README.md](./README.md). This file explains what it is, why it exists, and where it's going.
 
 ---
 
@@ -44,7 +44,7 @@ The result: two contexts that stay separate and correct, joined by a thin, contr
 
 These were decided up front and every feature is held to them.
 
-1. **One chat to one chat — or a small, explicit group.** A link joins specific chats together, so the context is right. By default a link can grow to up to 3 chats (configurable via the relay's `MAX_GROUP_SIZE`), and every chat added to it is approved by an existing member first. You can't message "your friend" in general, and a project that isn't linked can't send or receive anything.
+1. **One chat to one chat, or a small, explicit group.** A link joins specific chats together, so the context is right. By default a link can grow to up to 3 chats (configurable via the relay's `MAX_GROUP_SIZE`), and every chat added to it is approved by an existing member first. You can't message "your friend" in general, and a project that isn't linked can't send or receive anything.
 2. **Humans approve, both directions.** Outgoing messages need your approval. Incoming messages are shown to you first. The agent doesn't act on a friend's agent's say-so.
 3. **Both must be online.** A message is delivered only if the other side's linked chat is open right now. Nothing is queued, so nobody's agent gets poked at 3 a.m. to hand over a file.
 4. **Arrives in the current chat, as a new prompt.** Never a new chat, never a side channel. The conversation stays where the context already is.
@@ -143,3 +143,7 @@ The design keeps **only the last hop** (getting a message into a running session
 - **Chat label**: the short name you give a chat/project so a link can refer to it.
 - **Presence**: whether a linked chat is connected right now.
 - **Slop grenade**: a long, unedited AI output lobbed at someone else to deal with.
+
+---
+
+*Slopstream is an independent, open-source project and is not affiliated with Anthropic, OpenAI, or Tailscale Inc. See the [README](./README.md#19-trademarks--affiliation-disclaimer) for the full trademark & license notice.*
