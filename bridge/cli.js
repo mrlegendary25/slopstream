@@ -3,9 +3,11 @@
 // Deliberately NOT available to the agent.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, configFile, codexThreadFile, pausedFile } from './config.js';
+import { execSync } from 'node:child_process';
+import { loadConfig, saveConfig, configFile, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg } from './net.js';
 import { runInit } from './init.js';
 import { runStatus } from './status.js';
@@ -15,13 +17,37 @@ import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 const args = process.argv.slice(2);
 const yes = args.includes('--yes');
 const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined; };
-const optVals = new Set(['agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
+const optVals = new Set(['agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to', 'relay-data'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
 const pos = args.filter((a, i) => !a.startsWith('--') && !optVals.has(i));
 const [cmd, ...rest] = pos;
 const die = (m) => { console.error(m); process.exit(1); };
 
 const ask = (q) => new Promise((res) => { const rl = readline.createInterface({ input: process.stdin, output: process.stdout }); rl.question(q, a => { rl.close(); res(a); }); });
 const needCfg = () => loadConfig() || die('Not set up. Run: slopstream setup <relay-url> <your-user> <your-token>');
+
+// Any process (relay/server.js itself, or a `caffeinate ... node relay/server.js` wrapper around it) whose
+// command line mentions relay/server.js. pgrep is BSD/macOS built-in, which matches this project's macOS-only support.
+function findRelayPids() {
+  try {
+    return execSync("pgrep -f 'relay/server\\.js'", { encoding: 'utf8' })
+      .split('\n').map((s) => Number(s.trim())).filter((pid) => pid && pid !== process.pid);
+  } catch { return []; } // pgrep exits non-zero when nothing matches
+}
+
+async function stopRunningRelays() {
+  const pids = findRelayPids();
+  if (!pids.length) { console.log('No running relay process found on this machine.'); return; }
+  console.log(`Stopping running relay process(es): ${pids.join(', ')}`);
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+  await new Promise((r) => setTimeout(r, 1500));
+  for (const pid of findRelayPids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+}
+
+function wipeEverything({ home, relayData }) {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(relayData, { recursive: true, force: true });
+  console.log('Done. Everything reset to zero.\nStart fresh with: node relay/admin.js add-user <name>, then slopstream setup ...');
+}
 
 async function main() {
   switch (cmd) {
@@ -130,6 +156,30 @@ async function main() {
       } catch { /* silent */ }
       break;
     }
+    case 'force-clean':
+    case 'force-stop-clean': {
+      // Nukes everything back to zero: this machine's saved login/pauses/logs, AND the relay's
+      // users/links/audit log. Does NOT touch the npm link (the `slopstream` command stays installed).
+      // force-stop-clean additionally finds and kills any running relay/server.js process first.
+      const stopFirst = cmd === 'force-stop-clean';
+      const home = opt('home') ? path.resolve(opt('home')) : defaultHome();
+      const relayData = opt('relay-data')
+        ? path.resolve(opt('relay-data'))
+        : (process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(os.homedir(), '.slopstream-relay'));
+      console.log(`This will PERMANENTLY delete:
+  - this machine's saved login, pauses and logs:  ${home}
+  - the relay's data (ALL users, ALL links, audit log):  ${relayData}
+
+The "slopstream" command itself (the npm link) is NOT removed.`);
+      console.log(stopFirst
+        ? 'Any running relay process on this machine will be stopped first.'
+        : "If the relay is running, stop it first (Ctrl+C) -- deleting its data while it's running can corrupt it.\n(Or run slopstream force-stop-clean to have this done for you.)");
+      const ok = yes || /^yes$/i.test((await ask('Type "yes" to continue: ')).trim());
+      if (!ok) { console.log('Aborted. Nothing was deleted.'); break; }
+      if (stopFirst) await stopRunningRelays();
+      wipeEverything({ home, relayData });
+      break;
+    }
     case 'status': process.exitCode = await runStatus(); break;
     case 'simulate': {
       const chat = opt('chat'); if (!chat) die('usage: slopstream simulate --chat <chat-label> [--agent claude|codex]');
@@ -158,6 +208,12 @@ usage: slopstream <command>
   unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
   pause <chat>                       stop a chat connecting to the relay, without unlinking it
   resume <chat>                      undo pause
+  force-clean [--yes] [--relay-data <dir>] [--home <dir>]
+                                      DANGER: wipe this machine's login/pauses/logs AND the relay's
+                                      users/links/audit log back to zero. Keeps the npm link.
+  force-stop-clean [--yes] [--relay-data <dir>] [--home <dir>]
+                                      same as force-clean, but first finds and kills any running
+                                      relay/server.js process on this machine.
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
   demo up|status|peer|down           test everything on THIS laptop alone (see TESTING.md)
