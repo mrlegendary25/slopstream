@@ -102,7 +102,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 ## 8. Where it stands (V1)
 
 **Works today** (covered by automated end-to-end checks):
-- Claude Code to Claude Code, on macOS. Windows has code paths for everything macOS-specific (relay pidfile instead of `pgrep`, PowerShell approval dialog instead of osascript, `.cmd` shim resolution for the Codex push) but is **not yet tested end to end**
+- Claude Code to Claude Code, on **macOS and Windows**, including a Mac host with a Windows joiner (tested end to end). Still untested: Windows as the relay host, and the PowerShell approval dialog. Codex on Windows does not work yet (the Codex `SessionStart` hook is written with POSIX quoting)
 - **Codex** on either side: Claude to Codex, Codex to Claude, Codex to Codex. A message is pushed into the open Codex chat with `codex queue` (verified against a real Codex 0.162.1), behind a hard approval pop-up, with an inbox fallback
 - A one-command **solo test mode** (`slopstream demo`) so one person can test two or three sides on one Mac
 - **Small groups, not just pairs**: a link can grow to up to `MAX_GROUP_SIZE` chats (default 3) via `slopstream invite`, each addition approved by an existing member. `send_message` takes an optional `to` once more than one peer is linked

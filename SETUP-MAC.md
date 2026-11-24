@@ -8,7 +8,7 @@ Minimum commands to get linked. No explanations, no optional steps; if something
 
 One person is the **host** (runs the relay). Everyone else is a **joiner**. Do Part 1 as everyone, then Part 2 (host) or Part 3 (joiner) as your role.
 
-**Mixed Mac and Windows is fine**: the relay and the bridge speak the same protocol on both. Each person follows the file for their own machine.
+**Mixed Mac and Windows is fine**: the relay and the bridge speak the same protocol on both. Each person follows the file for their own machine. A **Mac host with a Windows joiner, Claude Code to Claude Code, is tested**.
 
 ---
 
@@ -59,6 +59,8 @@ slopstream init projX
 claude --dangerously-load-development-channels server:slopstream
 ```
 
+**Claude Code asks before it will use a project's MCP server.** On that first start, approve the prompt about this project's servers. Until you do, `slopstream` stays at `⏸ Pending approval` and `/mcp` does not list it. Check with `claude mcp list` from the project folder; if you dismissed the prompt earlier, run `claude mcp reset-project-choices` and start Claude again.
+
 ---
 
 ## 3. Joiner
@@ -89,6 +91,8 @@ cd ~/path/to/your/project
 slopstream init projX
 claude --dangerously-load-development-channels server:slopstream
 ```
+
+**Claude Code asks before it will use a project's MCP server.** On that first start, approve the prompt about this project's servers. Until you do, `slopstream` stays at `⏸ Pending approval` and `/mcp` does not list it. Check with `claude mcp list` from the project folder; if you dismissed the prompt earlier, run `claude mcp reset-project-choices` and start Claude again.
 
 ---
 

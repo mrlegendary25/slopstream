@@ -4,7 +4,7 @@
 
 Minimum commands to get linked, in **PowerShell**. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires Windows 10 1809+ or 11, Node 20+, Claude Code ≥2.1.80.
 
-> **Windows is not yet tested end to end.** The macOS path is the tested one. Every macOS-specific piece has a Windows code path (the relay writes a pidfile instead of being found with `pgrep`, approval pop-ups use PowerShell instead of osascript, the Codex push resolves the `.cmd` shim instead of shelling out), but nobody has yet run a full Windows link. If something here is wrong, please [open an issue](https://github.com/mrlegendary25/slopstream/issues).
+> **Tested, with a known boundary.** A **Mac host with a Windows joiner, Claude Code to Claude Code**, has been run end to end: pairing, `link_status`, and messages in both directions. Two things in this file are still *untested*: **Windows as the relay host** (Part 2), and the **PowerShell approval pop-up**, which only the Codex path uses. **Codex on Windows does not work yet** (see [Part 5](#5-windows-notes-worth-knowing)). If something here is wrong, please [open an issue](https://github.com/mrlegendary25/slopstream/issues).
 
 One person is the **host** (runs the relay). Everyone else is a **joiner**. Do Part 1 as everyone, then Part 2 (host) or Part 3 (joiner) as your role.
 
@@ -36,6 +36,8 @@ One person is the **host** (runs the relay). Everyone else is a **joiner**. Do P
 ---
 
 ## 2. Host
+
+> Running the relay **on Windows** is the part of this file that has not been tested. The tested setup is a Mac host with a Windows joiner. If your host is on a Mac, they use [SETUP-MAC.md](./SETUP-MAC.md) Part 2 and you skip to [Part 3](#3-joiner).
 
 Get Slopstream, pick one:
 
@@ -96,6 +98,8 @@ slopstream init projX
 claude --dangerously-load-development-channels server:slopstream
 ```
 
+**Claude Code asks before it will use a project's MCP server.** On that first start, approve the prompt about this project's servers. Until you do, `slopstream` stays at `⏸ Pending approval` and `/mcp` does not list it. Check with `claude mcp list` from the project folder; if you dismissed the prompt earlier, run `claude mcp reset-project-choices` and start Claude again.
+
 ---
 
 ## 3. Joiner
@@ -133,6 +137,8 @@ cd C:\path\to\your\project
 slopstream init projX
 claude --dangerously-load-development-channels server:slopstream
 ```
+
+**Claude Code asks before it will use a project's MCP server.** On that first start, approve the prompt about this project's servers. Until you do, `slopstream` stays at `⏸ Pending approval` and `/mcp` does not list it. Check with `claude mcp list` from the project folder; if you dismissed the prompt earlier, run `claude mcp reset-project-choices` and start Claude again.
 
 A joiner never runs the relay, so nothing in this part is Windows-specific beyond `cd` taking a `C:\` path.
 
@@ -178,10 +184,10 @@ Also remove the Tailscale share from <https://console.tailscale.com/admin/machin
 
 - **`&&` is not a statement separator in PowerShell 5.1** (the one that ships with Windows). That is why every command above is on its own line. PowerShell 7 supports `&&`.
 - **`~` is `$HOME`** in PowerShell. `$HOME` is used throughout this file so you can paste lines as they are.
-- **Stopping the relay.** `slopstream` finds a running relay through a pidfile the relay writes on start (`$env:DATA_DIR\relay.pid` and `$HOME\.slopstream-relay.pid`), not by scanning process names. If you started the relay some other way and `slopstream` cannot see it, just close its window.
-- **Approval pop-ups.** The `native` gate, which Codex uses and Claude Code does not, is a PowerShell message box with **Yes** / **No** buttons rather than named buttons, so the action is spelled out in the message text. Set `SLOPSTREAM_PWSH=pwsh.exe` to use PowerShell 7 for it.
+- **Stopping the relay.** `slopstream` finds a running relay through a pidfile the relay writes on start (`$env:DATA_DIR\relay.pid` and `$HOME\.slopstream-relay.pid`), not by scanning process names. If you started the relay some other way and `slopstream` cannot see it, just close its window. *Not yet tested on Windows,* since the tested setup hosts the relay on a Mac.
+- **Approval pop-ups.** The `native` gate, which Codex uses and Claude Code does not, is a PowerShell message box with **Yes** / **No** buttons rather than named buttons, so the action is spelled out in the message text. Set `SLOPSTREAM_PWSH=pwsh.exe` to use PowerShell 7 for it. *Not yet tested,* because Claude Code to Claude Code never reaches it.
 - **Your token file is not locked down.** `$HOME\.slopstream\config.json` is written owner-only on macOS. Windows ignores that mode flag, so the file gets your user profile's default permissions. Fine on a single-user machine; tighten it yourself on a shared one.
-- **Codex on Windows is not expected to work yet.** `slopstream init projX --agent codex` writes a `SessionStart` hook command into `.codex\config.toml` using POSIX single-quoting, which `cmd.exe` does not understand. Claude Code to Claude Code is unaffected. Tracked as a known gap.
+- **Codex on Windows does not work yet.** `slopstream init projX --agent codex` writes a `SessionStart` hook command into `.codex\config.toml` using POSIX single-quoting, which `cmd.exe` does not understand. Claude Code to Claude Code is unaffected. Tracked as a known gap.
 
 ---
 

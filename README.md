@@ -100,7 +100,7 @@ Throughout this guide, the examples assume **you** are the relay host and **your
 
 Each of you needs:
 
-- [ ] A **Mac on macOS 12 (Monterey) or newer**, or **Windows 10 1809+ / 11**. macOS is the tested platform. Windows is supported in code but **not yet tested end to end**, so treat it as beta and expect to report bugs. On Windows, follow [SETUP-WINDOWS.md](./SETUP-WINDOWS.md) for the commands; this file's examples are written for a Unix shell. The behavioural differences are summarised in [Running on Windows](#running-on-windows).
+- [ ] A **Mac on macOS 12 (Monterey) or newer**, or **Windows 10 1809+ / 11**. Both work for Claude Code to Claude Code; a Mac host with a Windows joiner is tested. On Windows, follow [SETUP-WINDOWS.md](./SETUP-WINDOWS.md) for the commands, because this file's examples are written for a Unix shell, and see [Running on Windows](#running-on-windows) for what is and is not covered.
 - [ ] **Node.js 20 or newer.** Check with `node -v`. If it's missing or old, install it from [nodejs.org](https://nodejs.org) or with `nvm install --lts`.
 - [ ] **Claude Code v2.1.80 or newer.** Check with `claude --version`; update with `claude update`.
 - [ ] Claude Code logged in with your **claude.ai account** (a Pro plan is fine). Channels do **not** work with an API key. Inside Claude Code, `/status` shows how you're logged in.
@@ -508,7 +508,9 @@ Bridge and CLI:
 
 ### Running on Windows
 
-macOS is the platform Slopstream is tested on. Windows is supported in the code but **has not been tested end to end yet**, so treat this as beta. If something here is wrong, [open an issue](https://github.com/mrlegendary25/slopstream/issues) and say so.
+**Tested:** a **Mac host with a Windows joiner, Claude Code to Claude Code**, run end to end: pairing, `link_status`, and messages both ways.
+
+**Not tested yet:** **Windows as the relay host**, and the **PowerShell approval pop-up** (only the Codex path uses it). **Codex on Windows does not work yet**, see the last bullet below. If something here is wrong, [open an issue](https://github.com/mrlegendary25/slopstream/issues) and say so.
 
 **For the commands, use [SETUP-WINDOWS.md](./SETUP-WINDOWS.md)**, which is this whole guide's fast path rewritten in PowerShell, for both the host and the joiner role. What follows is just the behavioural differences.
 
@@ -519,9 +521,10 @@ What is different on Windows:
   $env:HOST="100.101.102.103"; $env:PORT="8787"; $env:DATA_DIR="$HOME\.slopstream-relay"; node relay/server.js
   ```
   Keep the machine awake in Settings, System, Power instead.
-- **`slopstream stop`** finds the relay through a pidfile the relay writes on start (`<DATA_DIR>\relay.pid` and `%USERPROFILE%\.slopstream-relay.pid`), not by scanning process names. If you started the relay a different way and `stop` cannot see it, close its window.
-- **Approval pop-ups** (the `native` gate, which Codex uses) are a PowerShell message box with **Yes** / **No** buttons rather than named buttons, so the action is spelled out in the message text. Set `SLOPSTREAM_PWSH=pwsh.exe` to use PowerShell 7.
+- **`slopstream stop`** finds the relay through a pidfile the relay writes on start (`<DATA_DIR>\relay.pid` and `%USERPROFILE%\.slopstream-relay.pid`), not by scanning process names. If you started the relay a different way and `stop` cannot see it, close its window. Not yet exercised on Windows, since the tested setup hosts the relay on a Mac.
+- **Approval pop-ups** (the `native` gate, which Codex uses) are a PowerShell message box with **Yes** / **No** buttons rather than named buttons, so the action is spelled out in the message text. Set `SLOPSTREAM_PWSH=pwsh.exe` to use PowerShell 7. Not yet tested, because Claude Code to Claude Code never reaches it.
 - **Codex push.** `codex` installs as a `.cmd` shim on Windows. Slopstream resolves the shim to the script it wraps and runs that directly, rather than going through `cmd.exe`, so message text never reaches a command interpreter. If it cannot find `codex`, the message waits in the inbox and you ask your agent `check slopstream`. Set `SLOPSTREAM_CODEX_BIN` to the full path if `codex` is installed somewhere unusual.
+- **Codex on Windows does not work yet.** `slopstream init <chat> --agent codex` writes the `SessionStart` hook command into `.codex\config.toml` with POSIX single-quoting, which `cmd.exe` does not understand. Claude Code to Claude Code is unaffected. Known gap.
 - **File permissions.** Your token in `~/.slopstream/config.json` is written with owner-only permissions on macOS. Windows ignores that mode flag, so the file lands with whatever your user profile's default permissions are. On a single-user machine that is fine; on a shared one, tighten it yourself.
 - **Tailscale** has a Windows app; the sharing and access-control steps in Step 1 and Step 2 are the same.
 
@@ -581,6 +584,8 @@ Linux is not covered: the relay and bridge should run, but there is no native ap
 5. macOS firewall: when starting the relay, click **Allow** on the "accept incoming network connections" prompt.
 
 **`error: auth: bad user or token`**: wrong username or token. Check for stray spaces. If the token is lost, the relay host runs `remove-user` then `add-user` and sends the new one.
+
+**`/mcp` does not list `slopstream` at all** (but `.mcp.json` exists in the folder): Claude Code requires approval before it will use a project's MCP servers, and until then the server sits at `⏸ Pending approval` and is not listed. Run `claude mcp list` from the project folder to see the status. Approve the prompt on startup; if you dismissed it earlier the choice is cached in `~/.claude.json`, so run `claude mcp reset-project-choices` and start Claude again. A freshly cloned, untrusted folder also cannot approve its own servers, so try a plain new directory to rule that out.
 
 **Bridge says `chat "projX" is not linked`** (visible in `link_status`): the label in `.mcp.json` doesn't match a link. Run `slopstream links`, then re-run `slopstream init <the-paired-label>` in the project.
 

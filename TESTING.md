@@ -18,7 +18,7 @@ There are three parts. Do them **in order**: Part 1 needs no second person and p
 
 Each person testing needs:
 
-- [ ] A Mac on **macOS 12 (Monterey) or newer**
+- [ ] A **Mac on macOS 12 (Monterey) or newer**, or **Windows 10 1809+ / 11**. Commands below are written for a Unix shell; on Windows use Git Bash, or translate them with [SETUP-WINDOWS.md](./SETUP-WINDOWS.md). Parts 1B and 3 (the approval pop-ups and Codex) are macOS-only for now.
 - [ ] **Node.js 20 or newer.** Check with `node -v`. If it's missing or old, install it from [nodejs.org](https://nodejs.org) or with `nvm install --lts`.
 - [ ] **Claude Code v2.1.80 or newer** (for the Claude side). Check with `claude --version`; update with `claude update`.
 - [ ] Claude Code logged in with your **claude.ai account** (Pro plan is fine). Channels do **not** work with an API key. Inside Claude Code, `/status` shows how you're logged in.
@@ -618,6 +618,8 @@ Worth knowing while you test, especially for the injection-style rows above.
 
 **`error: auth: bad user or token`**: wrong username or token. Check for stray spaces. If the token is lost, the relay host runs `remove-user` then `add-user` and sends the new one.
 
+**`/mcp` does not list `slopstream` at all** (but `.mcp.json` exists in the folder): Claude Code requires approval before it will use a project's MCP servers, and until then the server sits at `⏸ Pending approval` and is not listed. Run `claude mcp list` from the project folder to see the status. Approve the prompt on startup; if you dismissed it earlier the choice is cached in `~/.claude.json`, so run `claude mcp reset-project-choices` and start Claude again. A freshly cloned, untrusted folder also cannot approve its own servers, so try a plain new directory to rule that out.
+
 **Bridge says `chat "projX" is not linked`** (visible in `link_status`): the label in `.mcp.json` doesn't match a link. Run `slopstream links`, then re-run `slopstream init <the-paired-label>` in the project.
 
 **`link_status` shows `connectedToRelay: false`**: relay down, Tailscale off, or wrong address. If you moved or re-installed, run `slopstream setup ...` again.
@@ -743,9 +745,9 @@ Bridge and CLI:
 
 ## Known limits
 
-- **Not yet proven in a live Claude Code session or with the real macOS pop-ups** before this round of testing; that's exactly what Parts 1C, 1D, 2 and 3 are for.
+- **Windows is only partly covered.** A Mac host with a Windows joiner, Claude Code to Claude Code, is tested. Windows as the relay host and the PowerShell approval pop-up are not, and Codex on Windows does not work yet.
 - **Inbound approval is soft** (see Security section above).
-- **Both Macs must be on, and the relay host's Mac must be awake.** There's no always-on hosted relay yet.
+- **Both machines must be on, and the relay host's machine must be awake.** There's no always-on hosted relay yet.
 - **Claude Code and Codex.** A chat is a labelled project, not a specific session id. Codex needs one first message per session to bind to the right chat, and a recent Codex (verified on 0.162.1).
 - **Channels are a research preview** and may change in future Claude Code versions.
 - The relay host can read messages (no end-to-end encryption yet).
