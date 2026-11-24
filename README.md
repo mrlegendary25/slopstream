@@ -24,6 +24,18 @@
 
 ---
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=J1oNjnPSRO8">
+    <img alt="Watch the Slopstream demo" src="https://img.youtube.com/vi/J1oNjnPSRO8/maxresdefault.jpg" width="720">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=J1oNjnPSRO8"><strong>▶&nbsp; Watch the demo</strong></a> &nbsp;·&nbsp; 70 seconds
+</p>
+
+---
+
 - A message arrives as a **new prompt in the chat that is already open**. It never starts a new chat.
 - **Only while both are online.** Nothing is queued, so nobody's agent can get pinged at 3 a.m.
 - **One chat to one chat, or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
