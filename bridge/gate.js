@@ -6,8 +6,9 @@
 //   SLOPSTREAM_GATE_CMD=<command>   custom approver (used by tests and non-macOS). Receives JSON on stdin
 //                                   {kind, peer, text}; exit code 0 = approve, anything else = decline.
 //
-// "native" = a macOS dialog via osascript. The message text is passed as an argument, never spliced
-// into the AppleScript source, so a hostile message cannot inject script code.
+// "native" = a macOS dialog via osascript, or a Windows dialog via PowerShell. On both, the message
+// text reaches the dialog as data (an argv item on macOS, an environment variable on Windows) and is
+// never spliced into the script source, so a hostile message cannot inject script code.
 
 import { spawn } from 'node:child_process';
 
@@ -61,6 +62,39 @@ function runCmd(cmd, payload, timeoutMs) {
   });
 }
 
+// Windows equivalent of the osascript dialog. The script below is a fixed string: the body and title
+// are read from the environment at runtime, so message text is never parsed as PowerShell.
+const PS_DIALOG = [
+  'Add-Type -AssemblyName System.Windows.Forms | Out-Null;',
+  '$r = [System.Windows.Forms.MessageBox]::Show(',
+  '  $env:SLOPSTREAM_GATE_BODY,',
+  '  $env:SLOPSTREAM_GATE_TITLE,',
+  '  [System.Windows.Forms.MessageBoxButtons]::YesNo,',
+  '  [System.Windows.Forms.MessageBoxIcon]::Warning,',
+  '  [System.Windows.Forms.MessageBoxDefaultButton]::Button2);',
+  'if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output "approved" } else { Write-Output "declined" }',
+].join(' ');
+
+function runPowerShellDialog(body, title, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false, out = '';
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const exe = process.env.SLOPSTREAM_PWSH || 'powershell.exe';
+    let p;
+    // -STA is required for Windows Forms; -NoProfile keeps a user's profile out of the dialog.
+    try {
+      p = spawn(exe, ['-NoProfile', '-NonInteractive', '-STA', '-Command', PS_DIALOG], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, SLOPSTREAM_GATE_BODY: body, SLOPSTREAM_GATE_TITLE: title },
+      });
+    } catch (e) { return finish({ ok: false, out: '', error: e.message }); }
+    const timer = setTimeout(() => { try { p.kill(); } catch { /* already gone */ } finish({ ok: false, out: '', error: 'timed out' }); }, timeoutMs);
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', (e) => { clearTimeout(timer); finish({ ok: false, out: '', error: e.message }); });
+    p.on('close', (code) => { clearTimeout(timer); finish({ ok: code === 0, out: out.trim(), error: code === 0 ? null : `powershell exit ${code}` }); });
+  });
+}
+
 export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
   let chain = Promise.resolve(); // one dialog at a time, in arrival order
 
@@ -68,18 +102,24 @@ export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
     const peer = clean(req.peer || 'your friend');
     const text = shorten(req.text || '');
     if (cmd) return runCmd(cmd, { kind: req.kind, peer, text: clean(req.text || '') }, (timeoutSec + 10) * 1000);
-    if (process.platform !== 'darwin') {
-      return { approved: false, via: 'unavailable', reason: 'native approval pop-ups only work on macOS. Set SLOPSTREAM_GATE_CMD to your own approver, or SLOPSTREAM_GATE=off to rely on the agent\'s own permission prompts.' };
-    }
     const outbound = req.kind === 'outbound';
     const body = outbound
       ? `Your agent wants to send this message to ${peer}'s agent:\n\n${text}\n\nSend it?`
       : `${peer}'s agent sent this message (untrusted text from another AI agent):\n\n${text}\n\nLet your agent see it?`;
     const title = outbound ? 'Slopstream: approve outgoing message' : 'Slopstream: approve incoming message';
-    const args = [];
-    for (const line of DIALOG_SCRIPT(timeoutSec)) args.push('-e', line);
-    args.push(body, title, outbound ? "Don't send" : 'Decline', outbound ? 'Send' : 'Show to my agent');
-    const r = await runOsascript(args, (timeoutSec + 15) * 1000);
+    let r;
+    if (process.platform === 'darwin') {
+      const args = [];
+      for (const line of DIALOG_SCRIPT(timeoutSec)) args.push('-e', line);
+      args.push(body, title, outbound ? "Don't send" : 'Decline', outbound ? 'Send' : 'Show to my agent');
+      r = await runOsascript(args, (timeoutSec + 15) * 1000);
+    } else if (process.platform === 'win32') {
+      // MessageBox only offers Yes/No, so the action is spelled out in the body instead of on the buttons.
+      const q = outbound ? 'Send it?  (Yes = send, No = do not send)' : 'Let your agent see it?  (Yes = show, No = decline)';
+      r = await runPowerShellDialog(`${body}\n\n${q}`, title, (timeoutSec + 15) * 1000);
+    } else {
+      return { approved: false, via: 'unavailable', reason: 'native approval pop-ups only work on macOS and Windows. Set SLOPSTREAM_GATE_CMD to your own approver, or SLOPSTREAM_GATE=off to rely on the agent\'s own permission prompts.' };
+    }
     if (!r.ok) return { approved: false, via: 'native', reason: `could not show the approval dialog (${r.error})` };
     return r.out === 'approved' ? { approved: true, via: 'native' } : { approved: false, via: 'native', reason: r.out || 'declined' };
   }
@@ -98,7 +138,13 @@ export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
 // Best-effort, non-blocking macOS notification (used only when the gate is off and the agent has no push).
 // Set SLOPSTREAM_NOTIFY=off to silence these entirely (tests always do this; a real user can too).
 export function notify(title, text) {
-  if (process.platform !== 'darwin' || process.env.SLOPSTREAM_NOTIFY === 'off') return;
+  if (process.env.SLOPSTREAM_NOTIFY === 'off') return;
+  if (process.platform !== 'darwin') {
+    // No desktop toast outside macOS yet, but the bridge's stderr is visible in the agent's logs,
+    // so the message is not simply lost.
+    try { process.stderr.write(`[slopstream] ${clean(title)}: ${shorten(text).slice(0, 200)}\n`); } catch { /* ignore */ }
+    return;
+  }
   try {
     const p = spawn('osascript', ['-e', 'on run argv', '-e', 'display notification (item 1 of argv) with title (item 2 of argv)', '-e', 'end run', shorten(text).slice(0, 200), clean(title)], { stdio: 'ignore' });
     p.on('error', () => {});

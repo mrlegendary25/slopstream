@@ -25,22 +25,46 @@ const die = (m) => { console.error(m); process.exit(1); };
 const ask = (q) => new Promise((res) => { const rl = readline.createInterface({ input: process.stdin, output: process.stdout }); rl.question(q, a => { rl.close(); res(a); }); });
 const needCfg = () => loadConfig() || die('Not set up. Run: slopstream setup <relay-url> <your-user> <your-token>');
 
-// Any process (relay/server.js itself, or a `caffeinate ... node relay/server.js` wrapper around it) whose
-// command line mentions relay/server.js. pgrep is BSD/macOS built-in, which matches this project's macOS-only support.
-function findRelayPids() {
-  try {
-    return execSync("pgrep -f 'relay/server\\.js'", { encoding: 'utf8' })
-      .split('\n').map((s) => Number(s.trim())).filter((pid) => pid && pid !== process.pid);
-  } catch { return []; } // pgrep exits non-zero when nothing matches
+// The relay writes a pidfile on start (relay/server.js). That is the primary lookup and works on
+// every OS. `pgrep` stays as a Unix-only fallback so a relay started before pidfiles existed, or
+// wrapped in `caffeinate ... node relay/server.js`, is still found.
+function relayPidFiles(relayData) {
+  const files = [path.join(os.homedir(), '.slopstream-relay.pid')];
+  if (relayData) files.unshift(path.join(relayData, 'relay.pid'));
+  if (process.env.DATA_DIR) files.push(path.join(path.resolve(process.env.DATA_DIR), 'relay.pid'));
+  return files;
 }
 
-async function stopRunningRelays() {
-  const pids = findRelayPids();
+function readPidFile(f) {
+  try {
+    const pid = Number(JSON.parse(fs.readFileSync(f, 'utf8')).pid);
+    if (!pid || pid === process.pid) return 0;
+    process.kill(pid, 0); // throws if the process is gone, i.e. a stale pidfile
+    return pid;
+  } catch { return 0; }
+}
+
+function findRelayPids(relayData) {
+  const pids = new Set();
+  for (const f of relayPidFiles(relayData)) { const pid = readPidFile(f); if (pid) pids.add(pid); }
+  if (process.platform !== 'win32') {
+    try {
+      execSync("pgrep -f 'relay/server\\.js'", { encoding: 'utf8' })
+        .split('\n').map((s) => Number(s.trim()))
+        .filter((pid) => pid && pid !== process.pid)
+        .forEach((pid) => pids.add(pid));
+    } catch { /* pgrep exits non-zero when nothing matches */ }
+  }
+  return [...pids];
+}
+
+async function stopRunningRelays(relayData) {
+  const pids = findRelayPids(relayData);
   if (!pids.length) { console.log('No running relay process found on this machine.'); return; }
   console.log(`Stopping running relay process(es): ${pids.join(', ')}`);
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
   await new Promise((r) => setTimeout(r, 1500));
-  for (const pid of findRelayPids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+  for (const pid of findRelayPids(relayData)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
 }
 
 function wipeEverything({ home, relayData }) {
@@ -176,7 +200,7 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
         : "If the relay is running, stop it first (Ctrl+C) -- deleting its data while it's running can corrupt it.\n(Or run slopstream force-stop-clean to have this done for you.)");
       const ok = yes || /^yes$/i.test((await ask('Type "yes" to continue: ')).trim());
       if (!ok) { console.log('Aborted. Nothing was deleted.'); break; }
-      if (stopFirst) await stopRunningRelays();
+      if (stopFirst) await stopRunningRelays(relayData);
       wipeEverything({ home, relayData });
       break;
     }

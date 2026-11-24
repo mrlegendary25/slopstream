@@ -197,14 +197,54 @@ function boundCodexThread() {
   return null;
 }
 
+// On Windows an npm-installed CLI is a .cmd shim, which Node cannot spawn without a shell — and
+// routing the (untrusted) message text through cmd.exe would hand it to a command interpreter.
+// So resolve the shim to the node script it wraps and run that directly instead. Returns
+// { file, args } to spawn, or null when nothing usable is on PATH.
+function resolveWindowsBin(bin) {
+  const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const candidates = [];
+  if (path.isAbsolute(bin) || bin.includes('/') || bin.includes('\\')) {
+    candidates.push(bin, ...exts.map((e) => bin + e));
+  } else {
+    for (const dir of (process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
+      candidates.push(path.join(dir, bin), ...exts.map((e) => path.join(dir, bin + e)));
+    }
+  }
+  for (const c of candidates) {
+    let stat; try { stat = fs.statSync(c); } catch { continue; }
+    if (!stat.isFile()) continue;
+    const ext = path.extname(c).toLowerCase();
+    if (ext === '.exe' || ext === '.com') return { file: c, args: [] };
+    if (ext !== '.cmd' && ext !== '.bat') continue;
+    // An npm shim looks like:  "%~dp0\node.exe"  "%~dp0\..\pkg\bin\thing.js" %*
+    try {
+      const m = fs.readFileSync(c, 'utf8').match(/%~dp0[\\/]?([^"%\r\n]*?\.js)/i);
+      if (!m) continue;
+      const js = path.resolve(path.dirname(c), m[1].trim().replace(/[\\/]/g, path.sep));
+      if (fs.existsSync(js)) return { file: process.execPath, args: [js] };
+    } catch { /* unreadable shim, try the next candidate */ }
+  }
+  return null;
+}
+
 // Push an already-approved message into the open Codex chat as a new user turn: `codex queue --thread <id>`.
 // Calls the binary directly (no shell) so the text can't be interpreted as commands. Resolves true on success.
 function pushToCodex(thread, text) {
   return new Promise((resolve) => {
     const bin = process.env.SLOPSTREAM_CODEX_BIN || 'codex';
+    let file = bin, pre = [];
+    if (process.platform === 'win32') {
+      const r = resolveWindowsBin(bin);
+      if (!r) {
+        err(`could not find "${bin}" on PATH as an .exe or an npm .cmd shim; the message will wait in the inbox (ask your agent: check slopstream). Set SLOPSTREAM_CODEX_BIN to the full path if it is installed elsewhere.`);
+        return resolve(false);
+      }
+      file = r.file; pre = r.args;
+    }
     let done = false; const fin = (v) => { if (!done) { done = true; resolve(v); } };
     try {
-      const p = spawn(bin, ['queue', '--thread', thread, '--message', text], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const p = spawn(file, [...pre, 'queue', '--thread', thread, '--message', text], { stdio: ['ignore', 'ignore', 'pipe'] });
       let e = ''; p.stderr.on('data', d => { e += d; });
       p.on('error', (x) => { err('codex queue failed to start:', x.message); fin(false); });
       p.on('close', (code) => { if (code !== 0) err(`codex queue exited ${code}: ${e.trim().slice(0, 300)}`); fin(code === 0); });
