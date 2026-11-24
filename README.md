@@ -13,7 +13,8 @@
 </p>
 
 <p align="center">
-  <a href="./SETUP.md"><img alt="Setup guide" src="https://img.shields.io/badge/setup-fast%20path-2563eb?style=flat-square"></a>
+  <a href="./SETUP-MAC.md"><img alt="Setup guide for macOS" src="https://img.shields.io/badge/setup-macOS-2563eb?style=flat-square"></a>
+  <a href="./SETUP-WINDOWS.md"><img alt="Setup guide for Windows" src="https://img.shields.io/badge/setup-Windows-2563eb?style=flat-square"></a>
   <a href="./TESTING.md"><img alt="Testing guide" src="https://img.shields.io/badge/testing-guide-0ea5e9?style=flat-square"></a>
   <a href="./CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/contributions-welcome-22c55e?style=flat-square"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-ISC-6b7280?style=flat-square"></a>
@@ -40,7 +41,7 @@
 - **Only while both are online.** Nothing is queued, so nobody's agent can get pinged at 3 a.m.
 - **One chat to one chat, or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
 
-**New here? Start with [SETUP.md](./SETUP.md):** the fast path, commands only, no explanations. This file is the full how-to with explanations and reference material. For what Slopstream is and why it exists, see [product.md](./product.md).
+**New here? Start with the fast path for your machine, commands only, no explanations: [SETUP-MAC.md](./SETUP-MAC.md) or [SETUP-WINDOWS.md](./SETUP-WINDOWS.md).** This file is the full how-to with explanations and reference material. For what Slopstream is and why it exists, see [product.md](./product.md).
 
 ---
 
@@ -99,7 +100,7 @@ Throughout this guide, the examples assume **you** are the relay host and **your
 
 Each of you needs:
 
-- [ ] A Mac on **macOS 12 (Monterey) or newer**
+- [ ] A **Mac on macOS 12 (Monterey) or newer**, or **Windows 10 1809+ / 11**. macOS is the tested platform. Windows is supported in code but **not yet tested end to end**, so treat it as beta and expect to report bugs. On Windows, follow [SETUP-WINDOWS.md](./SETUP-WINDOWS.md) for the commands; this file's examples are written for a Unix shell. The behavioural differences are summarised in [Running on Windows](#running-on-windows).
 - [ ] **Node.js 20 or newer.** Check with `node -v`. If it's missing or old, install it from [nodejs.org](https://nodejs.org) or with `nvm install --lts`.
 - [ ] **Claude Code v2.1.80 or newer.** Check with `claude --version`; update with `claude update`.
 - [ ] Claude Code logged in with your **claude.ai account** (a Pro plan is fine). Channels do **not** work with an API key. Inside Claude Code, `/status` shows how you're logged in.
@@ -250,7 +251,7 @@ slopstream relay listening on ws://100.101.102.103:8787  data=/Users/you/.slopst
 What each part does:
 - `HOST=100.101.102.103` makes the relay listen **only on your Tailscale address**, so nothing on your Wi-Fi or the internet can reach it.
 - `PORT=8787` is the door number. Change it if something else uses it.
-- `caffeinate -i` stops your machine from falling asleep from inactivity while the relay runs.
+- `caffeinate -i` stops your machine from falling asleep from inactivity while the relay runs. It is a macOS program: **on Windows, drop it** and run `node relay/server.js` with the same environment variables (`$env:HOST="100.101.102.103"` and so on in PowerShell), then stop Windows from sleeping in Settings, System, Power.
 
 **Leave this terminal window open.** It is the relay. Closing it, or your machine going to sleep, takes the relay down and **nobody can message anybody**.
 
@@ -500,9 +501,31 @@ Bridge and CLI:
 | `SLOPSTREAM_HOME` | `~/.slopstream` | Where your login and local log live |
 | `SLOPSTREAM_CHAT` | the project's folder name | Which chat label this session is. `init` sets it for you |
 | `SLOPSTREAM_AGENT` | `claude` | `claude` (push via channel), `codex` (push via `codex queue`), or `generic` (inbox only). `init` sets it |
-| `SLOPSTREAM_GATE` | `off` for claude, `native` otherwise | `native` = the bridge asks you with a macOS pop-up before sending or showing a message |
-| `SLOPSTREAM_GATE_CMD` | none | Your own approver command (JSON on stdin, exit 0 = approve). For non-macOS or tests |
-| `SLOPSTREAM_CODEX_BIN` | `codex` | Which `codex` program to call for the push |
+| `SLOPSTREAM_GATE` | `off` for claude, `native` otherwise | `native` = the bridge asks you with a desktop pop-up before sending or showing a message (osascript on macOS, PowerShell on Windows) |
+| `SLOPSTREAM_GATE_CMD` | none | Your own approver command (JSON on stdin, exit 0 = approve). For Linux, or for tests |
+| `SLOPSTREAM_PWSH` | `powershell.exe` | Windows only. Which PowerShell to use for the approval pop-up, e.g. `pwsh.exe` |
+| `SLOPSTREAM_CODEX_BIN` | `codex` | Which `codex` program to call for the push. On Windows give the full path if `codex` is not on `PATH` |
+
+### Running on Windows
+
+macOS is the platform Slopstream is tested on. Windows is supported in the code but **has not been tested end to end yet**, so treat this as beta. If something here is wrong, [open an issue](https://github.com/mrlegendary25/slopstream/issues) and say so.
+
+**For the commands, use [SETUP-WINDOWS.md](./SETUP-WINDOWS.md)**, which is this whole guide's fast path rewritten in PowerShell, for both the host and the joiner role. What follows is just the behavioural differences.
+
+What is different on Windows:
+
+- **Starting the relay.** Drop `caffeinate -i`; it is a macOS program. In PowerShell:
+  ```powershell
+  $env:HOST="100.101.102.103"; $env:PORT="8787"; $env:DATA_DIR="$HOME\.slopstream-relay"; node relay/server.js
+  ```
+  Keep the machine awake in Settings, System, Power instead.
+- **`slopstream stop`** finds the relay through a pidfile the relay writes on start (`<DATA_DIR>\relay.pid` and `%USERPROFILE%\.slopstream-relay.pid`), not by scanning process names. If you started the relay a different way and `stop` cannot see it, close its window.
+- **Approval pop-ups** (the `native` gate, which Codex uses) are a PowerShell message box with **Yes** / **No** buttons rather than named buttons, so the action is spelled out in the message text. Set `SLOPSTREAM_PWSH=pwsh.exe` to use PowerShell 7.
+- **Codex push.** `codex` installs as a `.cmd` shim on Windows. Slopstream resolves the shim to the script it wraps and runs that directly, rather than going through `cmd.exe`, so message text never reaches a command interpreter. If it cannot find `codex`, the message waits in the inbox and you ask your agent `check slopstream`. Set `SLOPSTREAM_CODEX_BIN` to the full path if `codex` is installed somewhere unusual.
+- **File permissions.** Your token in `~/.slopstream/config.json` is written with owner-only permissions on macOS. Windows ignores that mode flag, so the file lands with whatever your user profile's default permissions are. On a single-user machine that is fine; on a shared one, tighten it yourself.
+- **Tailscale** has a Windows app; the sharing and access-control steps in Step 1 and Step 2 are the same.
+
+Linux is not covered: the relay and bridge should run, but there is no native approval pop-up, so set `SLOPSTREAM_GATE_CMD` to your own approver or `SLOPSTREAM_GATE=off` to rely on your agent's own permission prompts.
 
 ### Where things are stored
 

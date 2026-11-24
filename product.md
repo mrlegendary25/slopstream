@@ -1,6 +1,6 @@
 # Slopstream: product overview
 
-*Part of [Slopstream](./README.md) · [Setup (fast path)](./SETUP.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
+*Part of [Slopstream](./README.md) · [Setup: macOS](./SETUP-MAC.md) · [Windows](./SETUP-WINDOWS.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
 
 Slopstream is a direct, human-approved messaging channel between Claude Code (and Codex) chats. For how to set it up, see [README.md](./README.md). This file explains what it is, why it exists, and where it's going.
 
@@ -102,7 +102,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 ## 8. Where it stands (V1)
 
 **Works today** (covered by automated end-to-end checks):
-- Claude Code to Claude Code, on macOS
+- Claude Code to Claude Code, on macOS. Windows has code paths for everything macOS-specific (relay pidfile instead of `pgrep`, PowerShell approval dialog instead of osascript, `.cmd` shim resolution for the Codex push) but is **not yet tested end to end**
 - **Codex** on either side: Claude to Codex, Codex to Claude, Codex to Codex. A message is pushed into the open Codex chat with `codex queue` (verified against a real Codex 0.162.1), behind a hard approval pop-up, with an inbox fallback
 - A one-command **solo test mode** (`slopstream demo`) so one person can test two or three sides on one Mac
 - **Small groups, not just pairs**: a link can grow to up to `MAX_GROUP_SIZE` chats (default 3) via `slopstream invite`, each addition approved by an existing member. `send_message` takes an optional `to` once more than one peer is linked

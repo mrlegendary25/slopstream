@@ -1,6 +1,6 @@
 # Testing Slopstream: full, step-by-step guide
 
-*Part of [Slopstream](./README.md) · [Setup (fast path)](./SETUP.md) · [Product overview](./product.md) · [Contributing](./CONTRIBUTING.md)*
+*Part of [Slopstream](./README.md) · [Setup: macOS](./SETUP-MAC.md) · [Windows](./SETUP-WINDOWS.md) · [Product overview](./product.md) · [Contributing](./CONTRIBUTING.md)*
 
 Everything you need to test Slopstream is in this one file: requirements, Tailscale setup, relay setup, pairing, starting Claude Code / Codex, and the test scripts themselves. (README.md and product.md still exist as reference/overview docs, but you shouldn't need to open them to run these tests.)
 

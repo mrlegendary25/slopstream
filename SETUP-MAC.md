@@ -1,10 +1,14 @@
-# Setup (fast path)
+# Setup on macOS (fast path)
 
-*Part of [Slopstream](./README.md) · [Product overview](./product.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
+*Part of [Slopstream](./README.md) · [Setup on Windows](./SETUP-WINDOWS.md) · [Product overview](./product.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
 
-Minimum commands to get linked. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires macOS, Node 20+, Claude Code ≥2.1.80.
+Minimum commands to get linked. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires macOS 13+, Node 20+, Claude Code ≥2.1.80.
+
+**On Windows?** Use [SETUP-WINDOWS.md](./SETUP-WINDOWS.md) for PowerShell commands. If you have Git for Windows, every command in *this* file also runs unchanged in Git Bash; just skip the `caffeinate -i`, which is a macOS program.
 
 One person is the **host** (runs the relay). Everyone else is a **joiner**. Do Part 1 as everyone, then Part 2 (host) or Part 3 (joiner) as your role.
+
+**Mixed Mac and Windows is fine**: the relay and the bridge speak the same protocol on both. Each person follows the file for their own machine.
 
 ---
 
