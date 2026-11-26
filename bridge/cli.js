@@ -8,7 +8,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { execSync } from 'node:child_process';
 import { loadConfig, saveConfig, configFile, codexThreadFile, pausedFile, defaultHome } from './config.js';
-import { admin, nextMsg } from './net.js';
+import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
 import { runStatus } from './status.js';
 import { runSimulate } from './simulate.js';
@@ -84,42 +84,81 @@ async function main() {
       console.log(`OK. Authenticated as "${user}". Saved to ${configFile()}`);
       break;
     }
-    case 'pair-create': {
-      const chat = rest[0]; if (!chat) die('usage: slopstream pair-create <chat-label> [--yes]');
-      const ws = await admin(needCfg());
-      ws.send(JSON.stringify({ t: 'pair_create', chat }));
-      const c = await nextMsg(ws, ['pair_code']);
-      console.log(`\nPairing code for chat "${chat}":  ${c.code}   (valid ${c.expiresInSec / 60} min)\nGive it to your friend. They run:  slopstream pair-accept ${c.code} <their-chat-label>\nWaiting...`);
-      const req = await nextMsg(ws, ['pair_request']);
-      console.log(`\n${req.from.user} wants to link their chat "${req.from.chat}" to your chat "${chat}".`);
-      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
-      ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied']);
-      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
-      ws.close(); break;
-    }
+    case 'pair-create':
     case 'invite': {
-      // Add a new person to a chat that is ALREADY linked (group grows up to the relay's MAX_GROUP_SIZE).
-      const chat = rest[0]; if (!chat) die('usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)');
+      // pair-create makes a NEW link; invite adds a person to a chat that is ALREADY linked (up to the relay's group limit).
+      const isInvite = cmd === 'invite';
+      const chat = rest[0];
+      if (!chat) die(isInvite ? 'usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)' : 'usage: slopstream pair-create <chat-label> [--yes]');
       const ws = await admin(needCfg());
-      ws.send(JSON.stringify({ t: 'invite_create', chat }));
+      ws.send(JSON.stringify({ t: isInvite ? 'invite_create' : 'pair_create', chat }));
       const c = await nextMsg(ws, ['pair_code']);
-      console.log(`\nInvite code for chat "${chat}":  ${c.code}   (valid ${c.expiresInSec / 60} min)\nGive it to the new person. They run:  slopstream pair-accept ${c.code} <their-chat-label>\nWaiting...`);
-      const req = await nextMsg(ws, ['pair_request']);
-      console.log(`\n${req.from.user} wants to join "${chat}" (their chat label: "${req.from.chat}").`);
+      const mine = (m) => normCode(m.code) === normCode(c.code);
+      const until = new Date(Date.now() + c.expiresInSec * 1000).toLocaleString();
+      console.log(`\n${isInvite ? 'Invite' : 'Pairing'} code for chat "${chat}":  ${c.code}   (valid until ${until})`);
+      if (c.url) console.log(`Link to send:  ${c.url}`);
+      console.log(`They run:  slopstream pair-accept ${c.code} <their-chat-label>\nWaiting...`);
+      const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
+      process.on('SIGINT', stays);
+      ws.on('close', stays);
+      const req = await nextMsg(ws, ['pair_request'], 0, mine);
+      console.log(`\n${req.from.user}${req.from.github ? ` (github.com/${req.from.github})` : ''} wants to ${isInvite ? `join "${chat}"` : `link their chat "${req.from.chat}" to your chat "${chat}"`}${isInvite ? ` (their chat label: "${req.from.chat}")` : ''}.`);
       const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied']);
+      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, mine);
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
+      ws.off('close', stays); process.off('SIGINT', stays);
       ws.close(); break;
     }
     case 'pair-accept': {
       const [code, chat] = rest; if (!code || !chat) die('usage: slopstream pair-accept <code> <chat-label>');
       const ws = await admin(needCfg());
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      const w = await nextMsg(ws, ['pair_waiting']); console.log(w.message);
-      const r = await nextMsg(ws, ['paired', 'pair_denied']);
+      const w = await nextMsg(ws, ['pair_waiting']);
+      console.log(`${w.message.charAt(0).toUpperCase()}${w.message.slice(1)}. You can close this; once approved the link appears in: slopstream links`);
+      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === normCode(code));
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied by the other side.');
+      ws.close(); break;
+    }
+    case 'requests': {
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'list_requests' }));
+      const { invites } = await nextMsg(ws, ['requests'], 5000);
+      if (!invites.length) console.log('No open invites.');
+      for (const v of invites) {
+        const r = v.requester;
+        console.log(`${v.code}  ${v.kind}  chat "${v.chat}"  expires ${new Date(v.expiresAt).toLocaleString()}  ` +
+          (r ? `REQUEST from ${r.user}${r.github ? ` (github.com/${r.github})` : ''} (chat "${r.chat}")  -> slopstream approve ${v.code}` : 'unused'));
+      }
+      ws.close(); break;
+    }
+    case 'approve':
+    case 'deny': {
+      const code = rest[0]; if (!code) die(`usage: slopstream ${cmd} <code>${cmd === 'approve' ? ' [--yes]' : ''}`);
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'list_requests' }));
+      const { invites } = await nextMsg(ws, ['requests'], 5000);
+      const v = invites.find(x => normCode(x.code) === normCode(code));
+      if (!v || !v.requester) die(v ? `Nobody has used invite ${v.code} yet.` : `No open invite ${code}.`);
+      let ok = false;
+      if (cmd === 'approve') {
+        const r = v.requester;
+        console.log(`${r.user}${r.github ? ` (github.com/${r.github})` : ''} wants to link their chat "${r.chat}" with your chat "${v.chat}".`);
+        ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      }
+      const mine = (m) => normCode(m.code) === normCode(v.code);
+      const done = nextMsg(ws, ['paired', 'pair_denied'], 5000, mine);
+      ws.send(JSON.stringify({ t: 'pair_decision', code: v.code, ok }));
+      const r = await done;
+      console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
+      ws.close(); break;
+    }
+    case 'cancel': {
+      const code = rest[0]; if (!code) die('usage: slopstream cancel <code>');
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'invite_cancel', code }));
+      const r = await nextMsg(ws, ['invite_cancelled'], 5000);
+      console.log(`Cancelled invite ${r.code}.`);
       ws.close(); break;
     }
     case 'links': {
@@ -228,6 +267,10 @@ usage: slopstream <command>
   pair-create <chat> [--yes]         make a pairing code for a chat, wait for friend, approve
   pair-accept <code> <chat>          accept a friend's code for one of your chats
   invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)
+  requests                           list your open invites and who has used them
+  approve <code> [--yes]             approve someone who used your invite (also works later, after you closed pair-create)
+  deny <code>                        refuse such a request
+  cancel <code>                      cancel an open invite
   links                              list your links (and who else is in each group)
   unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
   pause <chat>                       stop a chat connecting to the relay, without unlinking it

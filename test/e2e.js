@@ -35,7 +35,7 @@ check('bad token rejected at setup', (() => { try { cli('x', 'setup', RELAY, 'hi
 // 3. pairing through the real CLI (creator approves)
 const creator = spawn('node', [path.join(ROOT, 'bridge/cli.js'), 'pair-create', 'projX', '--yes'], { env: env('h') });
 let out = ''; creator.stdout.on('data', d => out += d);
-const code = (await waitFor(() => out.match(/projX":\s+([0-9A-F]{8})/)))?.[1];
+const code = (await waitFor(() => out.match(/projX":\s+([a-z2-9]{5}-[a-z2-9]{5})/)))?.[1];
 check('pair code issued', !!code, out);
 const accepted = cli('a', 'pair-accept', code, 'projX');
 await waitFor(() => /Linked/.test(out));

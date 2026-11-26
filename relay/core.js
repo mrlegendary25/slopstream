@@ -11,10 +11,14 @@
 import crypto from 'node:crypto';
 
 export const PROTOCOL = 2;
-const PAIR_TTL_MS = 10 * 60 * 1000;
+const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
+const ACCEPT_FAIL_MAX = 10;
+const ACCEPT_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,40}$/;
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const key = (user, chat) => `${user} ${chat}`;
+const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const displayCode = (c) => c.slice(0, 5) + '-' + c.slice(5);
 
 const str = (v, d) => (v === undefined || v === null ? d : String(v).trim());
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' ? d : Number(v));
@@ -49,7 +53,7 @@ export class RelayCore {
     this.conns = new Map();   // conn id -> conn
     this.online = new Map();  // "user chat" -> conn id (session connections only)
     this.rate = new Map();    // linkId -> [timestamps]
-    this.pending = new Map(); // code -> {user, chat, connId, exp, groupId, requester?} (T2 moves this into KV)
+    this.acceptFails = new Map(); // user -> [timestamps of bad pair_accept codes]
   }
 
   // ---- host-facing API ----
@@ -93,7 +97,6 @@ export class RelayCore {
         this.audit({ ev: 'offline', user: meta.user, chat: meta.chat });
       }
     }
-    for (const [code, p] of this.pending) if (p.connId === meta.id) this.pending.delete(code);
   }
 
   sweep() {
@@ -105,7 +108,11 @@ export class RelayCore {
       const fresh = arr.filter(t => now - t < this.config.rateWindowMs);
       if (fresh.length) this.rate.set(id, fresh); else this.rate.delete(id);
     }
-    for (const [code, p] of this.pending) if (p.exp < now) this.pending.delete(code);
+    for (const [k, inv] of this.kv.list('invite:')) if (inv.exp < now) this.kv.del(k);
+    for (const [u, arr] of this.acceptFails) {
+      const fresh = arr.filter(t => now - t < ACCEPT_FAIL_WINDOW_MS);
+      if (fresh.length) this.acceptFails.set(u, fresh); else this.acceptFails.delete(u);
+    }
   }
 
   async handleHttp(req) {
@@ -119,6 +126,31 @@ export class RelayCore {
   audit(o) {
     if (o.ev === 'msg' && !this.config.auditText) { const { text, ...rest } = o; o = rest; }
     this.kv.appendAudit({ ts: new Date(this.now()).toISOString(), ...o });
+  }
+  newCode() {
+    let c = '';
+    for (let i = 0; i < 10; i++) c += ALPHABET[crypto.randomInt(ALPHABET.length)];
+    return c;
+  }
+  // Returns the invite, or undefined if missing or expired (expired ones are deleted on the spot).
+  getInvite(code) {
+    const c = normCode(code);
+    const inv = c ? this.kv.get('invite:' + c) : undefined;
+    if (!inv) return undefined;
+    if (inv.exp < this.now()) { this.kv.del('invite:' + c); return undefined; }
+    return inv;
+  }
+  userInvites(user) { return this.kv.list('invite:').map(([, v]) => v).filter(v => v.user === user && v.exp >= this.now()); }
+  adminConnsOf(user) { return [...this.conns.values()].filter(c => c.meta.authed && c.meta.mode === 'admin' && c.meta.user === user); }
+  githubOf(user) { return this.kv.get('account:' + user)?.ghLogin || null; }
+  makeInvite(conn, chat, groupId) {
+    const user = conn.meta.user;
+    const { maxOpenInvites, inviteTtlMs, publicUrl } = this.config;
+    if (this.userInvites(user).length >= maxOpenInvites) { conn.send({ t: 'error', code: 'too_many_invites', message: `you already have ${maxOpenInvites} open invites; cancel some first` }); return; }
+    const code = this.newCode();
+    const createdAt = this.now();
+    this.kv.put('invite:' + code, { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null });
+    conn.send({ t: 'pair_code', code: displayCode(code), url: `${publicUrl}/j/${displayCode(code)}`, expiresInSec: inviteTtlMs / 1000 });
   }
   connOf(user, chat) { const id = this.online.get(key(user, chat)); return id ? this.conns.get(id) : undefined; }
   findLink(user, chat) { return this.links.find(l => l.members.some(m => m.user === user && m.chat === chat)); }
@@ -189,10 +221,8 @@ export class RelayCore {
         const chat = String(m.chat || '');
         if (!NAME_RE.test(chat)) return err('bad_chat', 'invalid chat label');
         if (this.findLink(user, chat)) return err('already_linked', `chat "${chat}" is already linked`);
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 hex chars
-        this.pending.set(code, { user, chat, connId: conn.meta.id, exp: this.now() + PAIR_TTL_MS, groupId: null });
-        this.audit({ ev: 'pair_create', user, chat });
-        return conn.send({ t: 'pair_code', code, expiresInSec: PAIR_TTL_MS / 1000 });
+        this.makeInvite(conn, chat, null);
+        return this.audit({ ev: 'pair_create', user, chat });
       }
       case 'invite_create': {
         // Add a NEW chat to a group that already has at least one link, up to maxGroupSize.
@@ -201,57 +231,77 @@ export class RelayCore {
         const link = this.findLink(user, chat);
         if (!link) return err('not_linked', `chat "${chat}" is not linked yet; use pair-create first`);
         if (link.members.length >= maxGroupSize) return err('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-        this.pending.set(code, { user, chat, connId: conn.meta.id, exp: this.now() + PAIR_TTL_MS, groupId: link.id });
-        this.audit({ ev: 'invite_create', user, chat, linkId: link.id });
-        return conn.send({ t: 'pair_code', code, expiresInSec: PAIR_TTL_MS / 1000 });
+        this.makeInvite(conn, chat, link.id);
+        return this.audit({ ev: 'invite_create', user, chat, linkId: link.id });
       }
       case 'pair_accept': {
-        const chat = String(m.chat || ''); const code = String(m.code || '').toUpperCase();
+        const chat = String(m.chat || '');
         if (!NAME_RE.test(chat)) return err('bad_chat', 'invalid chat label');
-        const p = this.pending.get(code);
-        if (!p || p.exp < this.now()) { this.pending.delete(code); return err('bad_code', 'unknown or expired code'); }
-        if (p.user === user) return err('same_user', 'cannot pair with yourself');
+        // Brute-force limiter: codes are ~49 bits, but nobody gets unlimited guesses.
+        const now = this.now();
+        const fails = (this.acceptFails.get(user) || []).filter(t => now - t < ACCEPT_FAIL_WINDOW_MS);
+        this.acceptFails.set(user, fails);
+        if (fails.length >= ACCEPT_FAIL_MAX) return err('too_many_attempts', 'too many wrong codes; try again in a few minutes');
+        const inv = this.getInvite(m.code);
+        if (!inv) { fails.push(now); return err('bad_code', 'unknown or expired code'); }
+        if (inv.user === user) return err('same_user', 'cannot pair with yourself');
         if (this.findLink(user, chat)) return err('already_linked', `chat "${chat}" is already linked`);
-        if (p.requester) return err('busy', 'code already in use');
-        if (p.groupId) {
-          const group = this.links.find(l => l.id === p.groupId);
+        if (inv.requester) return err('busy', 'code already in use');
+        if (inv.groupId) {
+          const group = this.links.find(l => l.id === inv.groupId);
           if (!group) return err('gone', 'that group no longer exists');
           if (group.members.length >= maxGroupSize) return err('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
           if (group.members.some(x => x.user === user)) return err('already_in_group', 'you already have a chat in this group');
         }
-        p.requester = { user, chat, connId: conn.meta.id };
-        const creator = this.conns.get(p.connId);
-        if (creator) creator.send({ t: 'pair_request', code, from: { user, chat } }); // the inviter's human must approve
-        conn.send({ t: 'pair_waiting', message: `waiting for ${p.user} to approve` });
-        this.audit({ ev: 'pair_request', from: user, fromChat: chat, to: p.user, toChat: p.chat });
+        inv.requester = { user, chat, at: now };
+        this.kv.put('invite:' + inv.code, inv);
+        const msg = { t: 'pair_request', code: displayCode(inv.code), from: { user, chat, github: this.githubOf(user) }, toChat: inv.chat };
+        for (const c of this.adminConnsOf(inv.user)) c.send(msg); // the inviter's human must approve
+        conn.send({ t: 'pair_waiting', code: displayCode(inv.code), message: `waiting for ${inv.user} to approve` });
+        this.audit({ ev: 'pair_request', from: user, fromChat: chat, to: inv.user, toChat: inv.chat });
         return;
       }
       case 'pair_decision': {
-        const code = String(m.code || '').toUpperCase();
-        const p = this.pending.get(code);
-        if (!p || p.connId !== conn.meta.id || !p.requester) return;
-        this.pending.delete(code);
-        const reqConn = this.conns.get(p.requester.connId);
-        const both = (o) => { conn.send(o); if (reqConn) reqConn.send(o); };
-        if (!m.ok) { both({ t: 'pair_denied' }); this.audit({ ev: 'pair_denied', user: p.user }); return; }
+        const inv = this.getInvite(m.code);
+        if (!inv || inv.user !== user || !inv.requester) return err('bad_code', 'no such pending request');
+        this.kv.del('invite:' + inv.code); // single use, even when denied
+        const dcode = displayCode(inv.code);
+        const req = inv.requester;
+        const toBoth = (o) => { for (const c of [...this.adminConnsOf(inv.user), ...this.adminConnsOf(req.user)]) c.send(o); };
+        if (!m.ok) { toBoth({ t: 'pair_denied', code: dcode }); this.audit({ ev: 'pair_denied', user: inv.user }); return; }
 
+        const countLinks = (u) => this.links.filter(l => l.members.some(x => x.user === u)).length;
+        const limited = inv.groupId ? [req.user] : [inv.user, req.user];
+        if (limited.some(u => countLinks(u) >= this.config.maxLinks)) return toBoth({ t: 'error', code: 'too_many_links', message: 'a user is at the maximum number of links' });
         let link;
-        if (p.groupId) {
-          link = this.links.find(l => l.id === p.groupId);
-          if (!link) return both({ t: 'error', code: 'gone', message: 'that group no longer exists' });
-          if (link.members.length >= maxGroupSize) return both({ t: 'error', code: 'group_full', message: 'group is now full' });
-          link.members.push({ user: p.requester.user, chat: p.requester.chat });
+        if (inv.groupId) {
+          link = this.links.find(l => l.id === inv.groupId);
+          if (!link) return toBoth({ t: 'error', code: 'gone', message: 'that group no longer exists' });
+          if (link.members.length >= maxGroupSize) return toBoth({ t: 'error', code: 'group_full', message: 'group is now full' });
+          link.members.push({ user: req.user, chat: req.chat });
         } else {
-          link = { id: crypto.randomUUID(), members: [{ user: p.user, chat: p.chat }, { user: p.requester.user, chat: p.requester.chat }], createdAt: new Date(this.now()).toISOString() };
+          link = { id: crypto.randomUUID(), members: [{ user: inv.user, chat: inv.chat }, { user: req.user, chat: req.chat }], createdAt: new Date(this.now()).toISOString() };
           this.links.push(link);
         }
         this.saveLinks();
-        this.audit({ ev: p.groupId ? 'member_added' : 'paired', linkId: link.id, by: user, added: { user: p.requester.user, chat: p.requester.chat } });
-        conn.send({ t: 'paired', link: { id: link.id }, members: this.otherMembers(link, p.user, p.chat) });
-        if (reqConn) reqConn.send({ t: 'paired', link: { id: link.id }, members: this.otherMembers(link, p.requester.user, p.requester.chat) });
+        this.audit({ ev: inv.groupId ? 'member_added' : 'paired', linkId: link.id, by: user, added: { user: req.user, chat: req.chat } });
+        for (const c of this.adminConnsOf(inv.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, inv.user, inv.chat) });
+        for (const c of this.adminConnsOf(req.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, req.user, req.chat) });
         this.broadcastMembers(link); // refresh anyone else already online in the group
         return;
+      }
+      case 'list_requests': {
+        const invites = this.userInvites(user).map(v => ({
+          code: displayCode(v.code), kind: v.kind, chat: v.chat, expiresAt: v.exp,
+          requester: v.requester ? { user: v.requester.user, chat: v.requester.chat, github: this.githubOf(v.requester.user) } : null,
+        }));
+        return conn.send({ t: 'requests', invites });
+      }
+      case 'invite_cancel': {
+        const inv = this.getInvite(m.code);
+        if (!inv || inv.user !== user) return err('bad_code', 'no such invite');
+        this.kv.del('invite:' + inv.code);
+        return conn.send({ t: 'invite_cancelled', code: displayCode(inv.code) });
       }
       case 'list_links': {
         // Presence of a link's members is visible to the people on that link, and nobody else.
