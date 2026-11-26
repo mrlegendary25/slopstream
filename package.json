@@ -7,7 +7,7 @@
   },
   "scripts": {
     "relay": "node relay/server.js",
-    "test": "node test/e2e.js && node test/codex.js && node test/group.js"
+    "test": "node test/core.js && node test/e2e.js && node test/codex.js && node test/group.js"
   },
   "keywords": [],
   "author": "",
