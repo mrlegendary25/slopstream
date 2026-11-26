@@ -53,7 +53,7 @@ export class RelayCore {
   constructor({ kv, config, fetchImpl = globalThis.fetch, now = () => Date.now() }) {
     this.kv = kv;
     this.config = config;
-    this.fetch = fetchImpl;
+    this.fetch = (...a) => fetchImpl(...a); // not a bare method call: Workers throw "Illegal invocation" if fetch gets a foreign `this`
     this.now = now;
     // A "link" is a group of 2..maxGroupSize chats that have all agreed to be reachable from one another.
     // { id, members: [{user, chat}, ...], createdAt }
@@ -133,6 +133,9 @@ export class RelayCore {
       if (fresh.length) this.acceptFails.set(u, fresh); else this.acceptFails.delete(u);
     }
   }
+
+  // True while there is state a sweep must eventually clean up (the Durable Object keeps its alarm running for it).
+  hasPendingState() { return this.kv.list('invite:').length > 0 || this.kv.list('devauth:').length > 0; }
 
   async handleHttp(req) {
     const { method, path } = req;

@@ -1,0 +1,14 @@
+{
+  "name": "slopstream-relay",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayDO"] }],
+  "vars": {
+    "PUBLIC_URL": "https://slopstream-relay.<SUBDOMAIN>.workers.dev",
+    "GITHUB_CLIENT_ID": "<SET IN T7>",
+    "AUDIT_TEXT": "0",
+    "MAX_GROUP_SIZE": "3"
+  }
+}

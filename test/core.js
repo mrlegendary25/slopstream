@@ -226,6 +226,13 @@ function world(env = {}, kv2 = newKv()) {
   check('other IPs unaffected', last(helloOn(w2, 'alice', 'ta', '8.8.8.8'), 'welcome')?.user === 'alice');
 }
 
+{
+  const w = world();
+  check('hasPendingState false when empty', w.core.hasPendingState() === false);
+  const a = w.hi('alice', 'ta'); w.sy(a, { t: 'pair_create', chat: 'web' });
+  check('hasPendingState true with an open invite', w.core.hasPendingState() === true);
+}
+
 // ---- T5: zombie takeover ----
 {
   const w = world();
