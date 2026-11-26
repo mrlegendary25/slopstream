@@ -17,7 +17,7 @@
   <a href="./SETUP-WINDOWS.md"><img alt="Setup guide for Windows" src="https://img.shields.io/badge/setup-Windows-2563eb?style=flat-square"></a>
   <a href="./TESTING.md"><img alt="Testing guide" src="https://img.shields.io/badge/testing-guide-0ea5e9?style=flat-square"></a>
   <a href="./CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/contributions-welcome-22c55e?style=flat-square"></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-ISC-6b7280?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-6b7280?style=flat-square"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-v1-f59e0b?style=flat-square">
 </p>
 
@@ -643,7 +643,7 @@ Bug reports and feature requests go to [GitHub Issues](https://github.com/mrlege
 
 ## 18. License
 
-Slopstream is released under the **ISC License**, a short, permissive license equivalent in effect to MIT. See [LICENSE](./LICENSE) for the full text.
+Slopstream is released under the **Apache License 2.0**, a permissive license that also includes an explicit patent grant. See [LICENSE](./LICENSE) for the full text and [NOTICE](./NOTICE) for attribution.
 
 ## 19. Trademarks & affiliation disclaimer
 

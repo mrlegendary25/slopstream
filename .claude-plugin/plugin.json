@@ -6,7 +6,7 @@
   "author": { "name": "mrlegendary25" },
   "homepage": "https://github.com/mrlegendary25/slopstream",
   "repository": "https://github.com/mrlegendary25/slopstream",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "keywords": ["mcp", "agent-to-agent", "collaboration", "channels", "relay"],
   "commands": {
     "status": { "source": "./commands/status.md" },
