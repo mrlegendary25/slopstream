@@ -130,5 +130,101 @@ function world(env = {}, kv2 = newKv()) {
   check('MAX_OPEN_INVITES enforced', last(a, 'error')?.code === 'too_many_invites' && w.kv.list('invite:').length === 2);
 }
 
+// ---- T3: device tokens + GitHub device flow (fake fetch, no network) ----
+{
+  // Scripted GitHub: `ghState` decides what the access_token endpoint answers.
+  let ghState = 'pending'; let calls = 0; let ghInterval = null; const ghUser = { id: 11, login: 'Dana' };
+  const fakeFetch = async (url, init = {}) => {
+    calls++;
+    const ok = (o) => ({ ok: true, status: 200, json: async () => o });
+    if (url.endsWith('/login/device/code')) return ok({ device_code: 'dc', user_code: 'UC-1', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 });
+    if (url.endsWith('/login/oauth/access_token')) {
+      if (ghState === 'pending') return ok({ error: 'authorization_pending' });
+      if (ghState === 'slow') return ok({ error: 'slow_down', interval: ghInterval });
+      if (ghState === 'denied') return ok({ error: 'access_denied' });
+      return ok({ access_token: 'gho-x' });
+    }
+    if (url.endsWith('/user')) return ok(ghUser);
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const mk = (env = {}, kv2) => {
+    const k = kv2 || new MemKV({ users: { alice: sha('ta') } });
+    const c2 = new RelayCore({ kv: k, config: configFromEnv({ PUBLIC_URL: 'https://r.test', GITHUB_CLIENT_ID: 'cid', ...env }), fetchImpl: fakeFetch, now: () => clock });
+    return { core: c2, kv: k, op: (ip = '1.1.1.1') => { const c = new FakeConn(); c2.openConn(c, { ip }); return c; } };
+  };
+  const post = (w, path, body, ip = '9.9.9.9') => w.core.handleHttp({ method: 'POST', path, body: JSON.stringify(body), ip }).then(r => ({ ...r, j: JSON.parse(r.body) }));
+  const get = (w, path) => w.core.handleHttp({ method: 'GET', path, body: '', ip: '' }).then(r => ({ ...r, j: JSON.parse(r.body) }));
+  const helloOn = (w, user, token, ip) => { const c = w.op(ip); w.core.onMessage(c, JSON.stringify({ t: 'hello', user, token })); return c; };
+
+  const w = mk();
+  const info = await get(w, '/v1/info');
+  check('/v1/info with client id', info.j.github === true && info.j.publicUrl === 'https://r.test' && info.j.protocol === 2);
+  check('/v1/info without client id', (await get(mk({ GITHUB_CLIENT_ID: '' }), '/v1/info')).j.github === false);
+  check('start without client id -> 404', (await post(mk({ GITHUB_CLIENT_ID: '' }), '/v1/auth/github/start', {})).status === 404);
+
+  const st = (await post(w, '/v1/auth/github/start', { label: 'my\x07 laptop' })).j;
+  check('start returns poll id + user code', st.status === 'started' && st.user_code === 'UC-1' && !!st.poll_id);
+  const before = calls;
+  check('poll too early -> pending without calling GitHub', (await post(w, '/v1/auth/github/poll', { poll_id: st.poll_id })).j.status === 'pending' && calls === before);
+  clock += 6000;
+  check('poll when GitHub says pending -> pending', (await post(w, '/v1/auth/github/poll', { poll_id: st.poll_id })).j.status === 'pending');
+  ghState = 'slow'; ghInterval = 12; clock += 6000;
+  const slow = (await post(w, '/v1/auth/github/poll', { poll_id: st.poll_id })).j;
+  check('slow_down raises the interval', slow.status === 'pending' && slow.interval === 12);
+  ghState = 'ok'; clock += 13000;
+  const ok1 = (await post(w, '/v1/auth/github/poll', { poll_id: st.poll_id })).j;
+  check('success returns user + sst_ token', ok1.status === 'ok' && ok1.user === 'dana' && ok1.token.startsWith('sst_'));
+  check('account, gh index and device stored', !!w.kv.get('account:dana') && w.kv.get('gh:11') === 'dana' && w.kv.list('device:').length === 1);
+  check('device label sanitized', w.kv.list('device:')[0][1].label === 'my laptop');
+  check('no GitHub token stored anywhere', !JSON.stringify([...w.kv.m]).includes('gho-x'));
+  const s1 = helloOn(w, 'dana', ok1.token);
+  check('device token authenticates a hello', last(s1, 'welcome')?.user === 'dana' && last(s1, 'welcome')?.protocol === 2);
+  const s1b = helloOn(w, '', ok1.token);
+  check('device token works without a user field', last(s1b, 'welcome')?.user === 'dana');
+  const mismatch = helloOn(w, 'alice', ok1.token);
+  check('sst_ token with mismatched user -> auth fail', last(mismatch, 'error')?.code === 'auth' && mismatch.closed?.c === 4003);
+
+  // a second login by the same GitHub id -> same username, second device
+  const st2 = (await post(w, '/v1/auth/github/start', {})).j;
+  clock += 6000;
+  ghUser.login = 'DanaRenamed';
+  const ok2 = (await post(w, '/v1/auth/github/poll', { poll_id: st2.poll_id })).j;
+  check('second login: same username, second device', ok2.user === 'dana' && ok2.token !== ok1.token && w.kv.list('device:').length === 2);
+  check('ghLogin refreshed but name unchanged', w.kv.get('account:dana').ghLogin === 'DanaRenamed');
+
+  // revoke closes the live conn and kills the token
+  const adm = helloOn(w, 'dana', ok2.token);
+  const live = helloOn(w, 'dana', ok1.token);
+  w.core.onMessage(adm, JSON.stringify({ t: 'device_list' }));
+  const devs = last(adm, 'devices').devices;
+  check('device_list marks the current device', devs.length === 2 && devs.filter(d => d.current).length === 1);
+  const victim = devs.find(d => !d.current);
+  w.core.onMessage(adm, JSON.stringify({ t: 'device_revoke', id: victim.id }));
+  check('device_revoke replies', last(adm, 'device_revoked')?.id === victim.id);
+  check('revoked device conn closed with 4003', live.closed?.c === 4003);
+  check('revoked token no longer works', last(helloOn(w, 'dana', ok1.token), 'error')?.code === 'auth');
+  w.core.onMessage(adm, JSON.stringify({ t: 'device_revoke', id: 'nope' }));
+  check('revoking a device you do not own -> not_found', last(adm, 'error')?.code === 'not_found');
+
+  // denied, name_taken
+  ghState = 'denied';
+  const st3 = (await post(w, '/v1/auth/github/start', {})).j; clock += 6000;
+  check('access_denied -> denied', (await post(w, '/v1/auth/github/poll', { poll_id: st3.poll_id })).j.status === 'denied');
+  ghState = 'ok'; ghUser.id = 12; ghUser.login = 'Alice';
+  const st4 = (await post(w, '/v1/auth/github/start', {})).j; clock += 6000;
+  const taken = (await post(w, '/v1/auth/github/poll', { poll_id: st4.poll_id })).j;
+  check('GitHub login colliding with a legacy user -> name_taken', taken.status === 'error' && taken.code === 'name_taken');
+  check('expired / unknown poll id -> expired', (await post(w, '/v1/auth/github/poll', { poll_id: 'zzz' })).j.status === 'expired');
+  const bj = await w.core.handleHttp({ method: 'POST', path: '/v1/auth/github/start', body: '{nope', ip: '1' });
+  check('bad JSON -> 400', bj.status === 400);
+
+  // per-IP auth failure limiter
+  const w2 = mk();
+  for (let i = 0; i < 20; i++) helloOn(w2, 'alice', 'wrong', '7.7.7.7');
+  const blocked = helloOn(w2, 'alice', 'ta', '7.7.7.7');
+  check('20 auth failures from one IP -> 4029', blocked.closed?.c === 4029);
+  check('other IPs unaffected', last(helloOn(w2, 'alice', 'ta', '8.8.8.8'), 'welcome')?.user === 'alice');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

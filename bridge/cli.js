@@ -7,9 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { execSync } from 'node:child_process';
-import { loadConfig, saveConfig, configFile, codexThreadFile, pausedFile, defaultHome } from './config.js';
+import { loadConfig, saveConfig, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
+import { runLogin } from './login.js';
 import { runStatus } from './status.js';
 import { runSimulate } from './simulate.js';
 import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
@@ -17,7 +18,7 @@ import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 const args = process.argv.slice(2);
 const yes = args.includes('--yes');
 const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined; };
-const optVals = new Set(['agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to', 'relay-data'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
+const optVals = new Set(['relay', 'agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to', 'relay-data'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
 const pos = args.filter((a, i) => !a.startsWith('--') && !optVals.has(i));
 const [cmd, ...rest] = pos;
 const die = (m) => { console.error(m); process.exit(1); };
@@ -82,6 +83,45 @@ async function main() {
       const ws = await admin(cfg); ws.close();
       saveConfig(cfg);
       console.log(`OK. Authenticated as "${user}". Saved to ${configFile()}`);
+      break;
+    }
+    case 'login': {
+      await runLogin({ relay: opt('relay') });
+      break;
+    }
+    case 'whoami': {
+      const cfg = needCfg();
+      console.log(`${cfg.user} on ${cfg.relay}`);
+      try { (await admin(cfg)).close(); console.log('✓ login works'); }
+      catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+      break;
+    }
+    case 'devices': {
+      const cfg = needCfg(); const ws = await admin(cfg);
+      if (rest[0] === 'revoke') {
+        if (!rest[1]) die('usage: slopstream devices revoke <id-prefix>');
+        ws.send(JSON.stringify({ t: 'device_list' }));
+        const { devices } = await nextMsg(ws, ['devices'], 5000);
+        const hits = devices.filter(d => d.id.startsWith(rest[1]));
+        if (hits.length !== 1) die(hits.length ? 'that prefix matches more than one device; use more characters' : 'no device with that id');
+        ws.send(JSON.stringify({ t: 'device_revoke', id: hits[0].id }));
+        await nextMsg(ws, ['device_revoked'], 5000);
+        console.log(`Revoked ${hits[0].label} (${hits[0].id.slice(0, 8)}).`);
+      } else {
+        ws.send(JSON.stringify({ t: 'device_list' }));
+        const { devices } = await nextMsg(ws, ['devices'], 5000);
+        if (!devices.length) console.log('(no devices; this login uses a legacy token)');
+        for (const d of devices) console.log(`${d.id.slice(0, 8)}  ${d.label.padEnd(30)}  last seen ${new Date(d.lastSeenAt).toLocaleString()}${d.current ? '  (this device)' : ''}`);
+      }
+      ws.close(); break;
+    }
+    case 'logout': {
+      const cfg = loadConfig();
+      if (cfg && cfg.auth === 'github' && cfg.deviceId) {
+        try { const ws = await admin(cfg); ws.send(JSON.stringify({ t: 'device_revoke', id: cfg.deviceId })); await nextMsg(ws, ['device_revoked'], 3000).catch(() => {}); ws.close(); } catch { /* relay unreachable: still log out locally */ }
+      }
+      fs.rmSync(configFile(), { force: true });
+      console.log('Logged out.');
       break;
     }
     case 'pair-create':
@@ -263,7 +303,11 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       console.log(`slopstream: seamless slop grenades. Safety pin included.
 
 usage: slopstream <command>
-  setup <relay-url> <user> <token>   save credentials (once per machine)
+  login [--relay <url>]              log in with GitHub (once per machine)
+  whoami                             show who you are logged in as and check it works
+  devices [revoke <id>]              list (or revoke) the devices logged in as you
+  logout                             revoke this device and forget the login
+  setup <relay-url> <user> <token>   save credentials of a self-hosted relay (once per machine)
   pair-create <chat> [--yes]         make a pairing code for a chat, wait for friend, approve
   pair-accept <code> <chat>          accept a friend's code for one of your chats
   invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)

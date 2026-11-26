@@ -12,10 +12,13 @@ import crypto from 'node:crypto';
 
 export const PROTOCOL = 2;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
+const AUTH_FAIL_MAX = 20;
+const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ACCEPT_FAIL_MAX = 10;
 const ACCEPT_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,40}$/;
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const json = (status, obj) => ({ status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, body: JSON.stringify(obj) });
 const key = (user, chat) => `${user} ${chat}`;
 const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const displayCode = (c) => c.slice(0, 5) + '-' + c.slice(5);
@@ -53,6 +56,8 @@ export class RelayCore {
     this.conns = new Map();   // conn id -> conn
     this.online = new Map();  // "user chat" -> conn id (session connections only)
     this.rate = new Map();    // linkId -> [timestamps]
+    this.authFails = new Map();   // ip -> [timestamps of failed hellos]
+    this.startsByIp = new Map();  // ip -> [timestamps of GitHub login starts]
     this.acceptFails = new Map(); // user -> [timestamps of bad pair_accept codes]
   }
 
@@ -109,6 +114,15 @@ export class RelayCore {
       if (fresh.length) this.rate.set(id, fresh); else this.rate.delete(id);
     }
     for (const [k, inv] of this.kv.list('invite:')) if (inv.exp < now) this.kv.del(k);
+    for (const [k, d] of this.kv.list('devauth:')) if (d.exp < now) this.kv.del(k);
+    for (const [ip, arr] of this.authFails) {
+      const fresh = arr.filter(t => now - t < AUTH_FAIL_WINDOW_MS);
+      if (fresh.length) this.authFails.set(ip, fresh); else this.authFails.delete(ip);
+    }
+    for (const [ip, arr] of this.startsByIp) {
+      const fresh = arr.filter(t => now - t < 3600000);
+      if (fresh.length) this.startsByIp.set(ip, fresh); else this.startsByIp.delete(ip);
+    }
     for (const [u, arr] of this.acceptFails) {
       const fresh = arr.filter(t => now - t < ACCEPT_FAIL_WINDOW_MS);
       if (fresh.length) this.acceptFails.set(u, fresh); else this.acceptFails.delete(u);
@@ -116,10 +130,112 @@ export class RelayCore {
   }
 
   async handleHttp(req) {
-    if (req.method === 'GET' && req.path === '/healthz') {
-      return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ok: true, protocol: PROTOCOL }) };
+    const { method, path } = req;
+    if (method === 'GET' && path === '/healthz') return json(200, { ok: true, protocol: PROTOCOL });
+    if (method === 'GET' && path === '/v1/info') {
+      const c = this.config;
+      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, publicUrl: c.publicUrl, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
+    }
+    if (method === 'POST' && (path === '/v1/auth/github/start' || path === '/v1/auth/github/poll')) {
+      let body = {};
+      try { body = req.body ? JSON.parse(req.body) : {}; } catch { return json(400, { status: 'error', code: 'bad_json' }); }
+      if (!body || typeof body !== 'object') body = {};
+      return path.endsWith('/start') ? this.githubStart(req, body) : this.githubPoll(body);
     }
     return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
+  }
+
+  // ---- GitHub device flow. The RELAY talks to GitHub, so a GitHub token never reaches the CLI and can only
+  // have been issued to OUR OAuth app (if the CLI sent us a token, one from some other app could be used to log in as that person).
+  async ghForm(url, fields) {
+    const r = await this.fetch(url, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) throw new Error('github http ' + r.status);
+    return r.json();
+  }
+
+  async githubStart(req, body) {
+    const c = this.config;
+    if (!c.githubClientId) return json(404, { status: 'error', code: 'github_disabled' });
+    const now = this.now();
+    const starts = (this.startsByIp.get(req.ip || '') || []).filter(t => now - t < 3600000);
+    if (starts.length >= 10) return json(429, { status: 'error', code: 'rate_limited' });
+    starts.push(now); this.startsByIp.set(req.ip || '', starts);
+    let gh;
+    try { gh = await this.ghForm(`${c.githubBaseUrl}/login/device/code`, { client_id: c.githubClientId }); } catch { gh = null; }
+    if (!gh || !gh.device_code) return json(502, { status: 'error', code: 'github_unavailable' });
+    const pollId = crypto.randomBytes(16).toString('base64url');
+    const interval = gh.interval || 5;
+    const label = String(body.label || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 60) || 'unknown device';
+    this.kv.put('devauth:' + pollId, { deviceCode: gh.device_code, interval, exp: now + gh.expires_in * 1000, nextPollAt: now + interval * 1000, label, inFlightAt: 0 });
+    return json(200, { status: 'started', poll_id: pollId, user_code: gh.user_code, verification_uri: gh.verification_uri, expires_in: gh.expires_in, interval });
+  }
+
+  async githubPoll(body) {
+    const c = this.config;
+    if (!c.githubClientId) return json(404, { status: 'error', code: 'github_disabled' });
+    const pollId = String(body.poll_id || '');
+    const key = 'devauth:' + pollId;
+    const d = pollId ? this.kv.get(key) : undefined;
+    const now = this.now();
+    if (!d || d.exp < now) { if (d) this.kv.del(key); return json(200, { status: 'expired' }); }
+    // Never call GitHub more often than it allows, and never twice concurrently (two polls must not create two devices).
+    if (now < d.nextPollAt || (d.inFlightAt && now - d.inFlightAt < 30000)) return json(200, { status: 'pending', interval: d.interval });
+    d.inFlightAt = now; this.kv.put(key, d);
+    const stillPending = (interval) => { d.interval = interval; d.nextPollAt = this.now() + interval * 1000; d.inFlightAt = 0; this.kv.put(key, d); return json(200, { status: 'pending', interval }); };
+    let gh;
+    try {
+      gh = await this.ghForm(`${c.githubBaseUrl}/login/oauth/access_token`, {
+        client_id: c.githubClientId, device_code: d.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });
+    } catch { gh = null; }
+    if (!gh) { d.inFlightAt = 0; this.kv.put(key, d); return json(502, { status: 'error', code: 'github_unavailable' }); }
+    if (gh.error === 'authorization_pending') return stillPending(d.interval);
+    if (gh.error === 'slow_down') return stillPending(gh.interval || d.interval + 5);
+    if (gh.error === 'expired_token') { this.kv.del(key); return json(200, { status: 'expired' }); }
+    if (gh.error === 'access_denied') { this.kv.del(key); return json(200, { status: 'denied' }); }
+    if (!gh.access_token) { d.inFlightAt = 0; this.kv.put(key, d); return json(502, { status: 'error', code: 'github_unavailable' }); }
+
+    // The GitHub token is used once, right here, to learn who the person is. It is never stored or logged.
+    let who;
+    try {
+      const r = await this.fetch(`${c.githubApiUrl}/user`, {
+        headers: { authorization: `Bearer ${gh.access_token}`, accept: 'application/vnd.github+json', 'user-agent': 'slopstream-relay', 'x-github-api-version': '2022-11-28' },
+        signal: AbortSignal.timeout(10000),
+      });
+      who = r.ok ? await r.json() : null;
+    } catch { who = null; }
+    if (!who || typeof who.id !== 'number' || !who.login) { d.inFlightAt = 0; this.kv.put(key, d); return json(502, { status: 'error', code: 'github_unavailable' }); }
+
+    let name = this.kv.get('gh:' + who.id);
+    if (!name) {
+      name = String(who.login).toLowerCase();
+      const users = this.kv.get('users') || {};
+      if (!NAME_RE.test(name) || this.kv.get('account:' + name) || Object.hasOwn(users, name)) {
+        this.kv.del(key);
+        return json(200, { status: 'error', code: 'name_taken', message: 'that username is already used on this relay' });
+      }
+      this.kv.put('account:' + name, { name, ghId: who.id, ghLogin: who.login, createdAt: now });
+      this.kv.put('gh:' + who.id, name);
+    } else {
+      // The relay username never changes after creation (links reference it), even if the person renames on GitHub.
+      const acc = this.kv.get('account:' + name);
+      if (acc) { acc.ghLogin = who.login; this.kv.put('account:' + name, acc); }
+    }
+    const mine = this.kv.list('device:').filter(([, dv]) => dv.user === name);
+    if (mine.length >= c.maxDevices) {
+      mine.sort((a, b) => a[1].lastSeenAt - b[1].lastSeenAt);
+      for (const [k] of mine.slice(0, mine.length - c.maxDevices + 1)) this.kv.del(k);
+    }
+    const token = 'sst_' + crypto.randomBytes(32).toString('base64url');
+    const deviceId = crypto.randomUUID();
+    this.kv.put('device:' + hashToken(token), { id: deviceId, user: name, label: d.label, createdAt: now, lastSeenAt: now });
+    this.kv.del(key);
+    this.audit({ ev: 'login', user: name, deviceId });
+    return json(200, { status: 'ok', user: name, token, device_id: deviceId });
   }
 
   // ---- helpers ----
@@ -180,18 +296,41 @@ export class RelayCore {
   // ---- protocol ----
   handleHello(conn, m) {
     const meta = conn.meta;
-    const users = this.kv.get('users') || {}; // re-read on every hello so `admin add-user` works without a restart
+    const now = this.now();
+    // Per-IP limiter on failed logins, checked before looking at the token at all.
+    const ipFails = (this.authFails.get(meta.ip) || []).filter(t => now - t < AUTH_FAIL_WINDOW_MS);
+    this.authFails.set(meta.ip, ipFails);
+    if (meta.ip && ipFails.length >= AUTH_FAIL_MAX) return conn.close(4029, 'slow down');
     const user = String(m.user || '');
-    const stored = Object.hasOwn(users, user) ? users[user] : undefined;
-    const given = hashToken(String(m.token || ''));
-    const ok = stored && stored.length === given.length &&
-      crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(given));
-    if (!ok) { this.audit({ ev: 'auth_fail', user }); conn.send({ t: 'error', code: 'auth', message: 'bad user or token' }); return conn.close(4003, 'auth'); }
-    meta.authed = true; meta.user = user;
+    const token = String(m.token || '');
+    const given = hashToken(token);
+    const fail = () => {
+      ipFails.push(now);
+      this.audit({ ev: 'auth_fail', user });
+      conn.send({ t: 'error', code: 'auth', message: 'bad user or token' });
+      return conn.close(4003, 'auth');
+    };
+    if (token.startsWith('sst_')) {
+      // Per-device token (GitHub login). Only its hash is stored, so a leaked relay database is not a leaked login.
+      const dev = this.kv.get('device:' + given);
+      if (!dev || (user && user !== dev.user)) return fail();
+      meta.user = dev.user; meta.deviceId = dev.id;
+      if (now - dev.lastSeenAt > 3600000) { dev.lastSeenAt = now; this.kv.put('device:' + given, dev); } // throttled: no write per connect
+    } else {
+      const users = this.kv.get('users') || {}; // legacy admin-created users; re-read on every hello so `admin add-user` works without a restart
+      const stored = Object.hasOwn(users, user) ? users[user] : undefined;
+      const ok = stored && stored.length === given.length &&
+        crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(given));
+      if (!ok) return fail();
+      meta.user = user;
+    }
+    meta.authed = true;
     // Which kind of agent is behind this session (claude, codex, console...). Informational only.
     meta.agent = /^[a-z0-9_-]{1,20}$/.test(String(m.agent || '')) ? String(m.agent) : 'unknown';
+    meta.v = Number(m.v) || 1;
+    const welcomeBase = { t: 'welcome', user: meta.user, protocol: PROTOCOL };
 
-    if (!m.chat) { meta.mode = 'admin'; conn.saveMeta(); return conn.send({ t: 'welcome', mode: 'admin' }); }
+    if (!m.chat) { meta.mode = 'admin'; conn.saveMeta(); return conn.send({ ...welcomeBase, mode: 'admin' }); }
 
     const chat = String(m.chat);
     if (!NAME_RE.test(chat)) { conn.send({ t: 'error', code: 'bad_chat', message: 'invalid chat label' }); return conn.close(4004, 'bad chat'); }
@@ -202,7 +341,7 @@ export class RelayCore {
     meta.mode = 'session'; meta.chat = chat; meta.linkId = link.id;
     conn.saveMeta();
     this.online.set(k, meta.id);
-    conn.send({ t: 'welcome', mode: 'session', link: { id: link.id }, members: this.otherMembers(link, user, chat) });
+    conn.send({ ...welcomeBase, mode: 'session', link: { id: link.id }, members: this.otherMembers(link, user, chat) });
     this.broadcastMembers(link); // tell everyone else in the group this chat just came online
     this.audit({ ev: 'online', user, chat, linkId: link.id });
   }
@@ -289,6 +428,22 @@ export class RelayCore {
         for (const c of this.adminConnsOf(req.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, req.user, req.chat) });
         this.broadcastMembers(link); // refresh anyone else already online in the group
         return;
+      }
+      case 'device_list': {
+        const devices = this.kv.list('device:').map(([, d]) => d).filter(d => d.user === user)
+          .map(d => ({ id: d.id, label: d.label, createdAt: d.createdAt, lastSeenAt: d.lastSeenAt, current: d.id === conn.meta.deviceId }));
+        return conn.send({ t: 'devices', devices });
+      }
+      case 'device_revoke': {
+        const id = String(m.id || '');
+        const entry = this.kv.list('device:').find(([, d]) => d.user === user && d.id === id);
+        if (!entry) return err('not_found', 'no such device');
+        this.kv.del(entry[0]);
+        for (const c of [...this.conns.values()]) {
+          if (c.meta.deviceId === id) { c.send({ t: 'error', code: 'auth', message: 'device revoked' }); c.close(4003, 'revoked'); }
+        }
+        this.audit({ ev: 'device_revoked', user, deviceId: id });
+        return conn.send({ t: 'device_revoked', id });
       }
       case 'list_requests': {
         const invites = this.userInvites(user).map(v => ({
