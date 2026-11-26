@@ -128,7 +128,7 @@ check('init codex: AGENTS.md rules block exactly once', (read(path.join(proj, 'A
 
 // solo demo, end to end, with two no-AI stand-ins
 const fakeHome = path.join(TMP, 'fakehome'); fs.mkdirSync(fakeHome);
-const denv = { ...process.env, HOME: fakeHome, SLOPSTREAM_GATE_CMD: 'true', SLOPSTREAM_NOTIFY: 'off' }; delete denv.SLOPSTREAM_HOME;
+const denv = { ...process.env, HOME: fakeHome, SLOPSTREAM_GATE_CMD: 'true', SLOPSTREAM_NOTIFY: 'off', SLOPSTREAM_ALLOW_NONINTERACTIVE: '1' }; delete denv.SLOPSTREAM_HOME;
 const up = execFileSync('node', [CLI, 'demo', 'up', '--a', 'claude', '--b', 'codex', '--port', '18791'], { env: denv, encoding: 'utf8' });
 check('demo up reports ready', /DEMO READY/.test(up), up);
 check('demo up wired both folders', fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-a/.mcp.json')) && fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-b/.codex/config.toml')));

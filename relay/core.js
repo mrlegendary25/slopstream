@@ -9,6 +9,7 @@
 // Wire format is A2A-shaped (contextId + parts[]) but this is NOT full A2A yet.
 
 import crypto from 'node:crypto';
+import { invitePage, gonePage, landingPage } from './html.js';
 
 export const PROTOCOL = 2;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
@@ -19,6 +20,9 @@ const ACCEPT_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,40}$/;
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const json = (status, obj) => ({ status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, body: JSON.stringify(obj) });
+const html = (status, body) => ({ status, body, headers: {
+  'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https://avatars.githubusercontent.com" } });
 const key = (user, chat) => `${user} ${chat}`;
 const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const displayCode = (c) => c.slice(0, 5) + '-' + c.slice(5);
@@ -136,6 +140,18 @@ export class RelayCore {
       const c = this.config;
       return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, publicUrl: c.publicUrl, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
     }
+    if (method === 'GET' && path.startsWith('/v1/invite/')) {
+      const inv = this.getInvite(decodeURIComponent(path.slice('/v1/invite/'.length)));
+      if (!inv) return json(404, { status: 'not_found' });
+      if (inv.requester) return json(200, { status: 'used' });
+      return json(200, { status: 'open', inviter: inv.user, inviterGithub: this.githubOf(inv.user), chat: inv.chat, kind: inv.kind, expiresAt: inv.exp });
+    }
+    if (method === 'GET' && path.startsWith('/j/')) {
+      let inv; try { inv = this.getInvite(decodeURIComponent(path.slice(3))); } catch { inv = undefined; }
+      if (!inv || inv.requester) return html(404, gonePage());
+      return html(200, invitePage({ inviter: inv.user, inviterGithub: this.githubOf(inv.user), code: displayCode(inv.code), expiresAt: inv.exp }));
+    }
+    if (method === 'GET' && path === '/') return html(200, landingPage());
     if (method === 'POST' && (path === '/v1/auth/github/start' || path === '/v1/auth/github/poll')) {
       let body = {};
       try { body = req.body ? JSON.parse(req.body) : {}; } catch { return json(400, { status: 'error', code: 'bad_json' }); }
