@@ -6,7 +6,14 @@ export function admin(cfg) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(cfg.relay);
     ws.once('error', (e) => reject(new Error(`cannot reach relay ${cfg.relay}: ${e.message}`)));
-    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', user: cfg.user, token: cfg.token })));
+    let hb = null;
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ t: 'hello', v: 2, user: cfg.user, token: cfg.token }));
+      // `link` and `join` can wait a long time; keep proxies from dropping the idle socket.
+      hb = setInterval(() => { try { ws.send('{"t":"ping"}'); } catch { /* closing */ } }, 25000);
+      hb.unref?.();
+    });
+    ws.on('close', () => { if (hb) clearInterval(hb); });
     const onMsg = (raw) => {
       const m = JSON.parse(raw.toString());
       if (m.t === 'welcome') { ws.off('message', onMsg); resolve(ws); }

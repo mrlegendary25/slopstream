@@ -297,12 +297,22 @@ async function deliverInbound(m) {
 
 let backoff = 1000;
 function connect() {
-  if (!cfg) { state.fatal = 'not set up. Run: slopstream setup <relay-url> <user> <token>'; err(state.fatal); return; }
+  if (!cfg) { state.fatal = 'not set up. Run in a terminal: slopstream login'; err(state.fatal); return; }
   if (state.fatal && state.fatal.startsWith('FATAL')) return;
   const ws = new WebSocket(cfg.relay);
   state.ws = ws;
-  ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', user: cfg.user, token: cfg.token, chat: CHAT, agent: AGENT })));
+  let lastPong = Date.now(); let hb = null;
+  ws.on('open', () => {
+    ws.send(JSON.stringify({ t: 'hello', v: 2, user: cfg.user, token: cfg.token, chat: CHAT, agent: AGENT }));
+    // Proxies drop idle WebSockets. The literal string matters: Cloudflare answers it without waking the relay.
+    hb = setInterval(() => {
+      if (Date.now() - lastPong > 60000) { ws.terminate(); return; }
+      try { ws.send('{"t":"ping"}'); } catch { /* closing */ }
+    }, 25000);
+  });
+  ws.on('pong', () => { lastPong = Date.now(); });
   ws.on('message', async (raw) => {
+    lastPong = Date.now();
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
     switch (m.t) {
       case 'welcome': {
@@ -328,8 +338,8 @@ function connect() {
       case 'msg': deliverInbound(m).catch((e) => err('deliver failed', e.message)); break; // not awaited: a pending pop-up must not block the socket
       case 'unlinked': state.fatal = 'FATAL: this chat was unlinked'; break;
       case 'error':
-        if (m.code === 'not_linked') state.fatal = `FATAL: chat "${CHAT}" is not linked. Run: slopstream pair-create ${CHAT}  (or pair-accept <code> ${CHAT})`;
-        else if (m.code === 'auth') state.fatal = 'FATAL: relay rejected your user/token';
+        if (m.code === 'not_linked') state.fatal = `FATAL: chat "${CHAT}" is not linked. Run in a terminal: slopstream link   (or: slopstream join <code>)`;
+        else if (m.code === 'auth') state.fatal = `FATAL: the relay rejected your login. Run: ${cfg.auth === 'github' ? 'slopstream login' : 'slopstream setup <relay-url> <user> <token>'}`;
         else if (m.code === 'duplicate') state.fatal = null; // stale connection; retry
         else err('relay error', m.code, m.message);
         if (state.fatal) err(state.fatal);
@@ -337,10 +347,11 @@ function connect() {
     }
   });
   ws.on('close', () => {
+    if (hb) clearInterval(hb);
     state.connected = false; for (const p of state.peers) p.online = false;
     for (const [id, r] of acks) { acks.delete(id); r({ delivered: false, reason: 'relay_disconnected' }); }
     if (state.fatal && state.fatal.startsWith('FATAL')) return;
-    setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);
+    setTimeout(connect, Math.round(backoff * (0.5 + Math.random()))); backoff = Math.min(backoff * 2, 30000);
   });
   ws.on('error', (e) => err('ws error', e.message));
 }

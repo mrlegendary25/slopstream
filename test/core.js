@@ -226,5 +226,21 @@ function world(env = {}, kv2 = newKv()) {
   check('other IPs unaffected', last(helloOn(w2, 'alice', 'ta', '8.8.8.8'), 'welcome')?.user === 'alice');
 }
 
+// ---- T5: zombie takeover ----
+{
+  const w = world();
+  const a = w.hi('alice', 'ta'); const b = w.hi('bob', 'tb');
+  w.sy(a, { t: 'pair_create', chat: 'web' }); const code = last(a, 'pair_code').code;
+  w.sy(b, { t: 'pair_accept', code, chat: 'api' }); w.sy(a, { t: 'pair_decision', code, ok: true });
+  const sess = (u, t) => { const c = w.op(); c.lastActivity = () => c.activity ?? clock; w.core.onMessage(c, JSON.stringify({ t: 'hello', v: 2, user: u, token: t, chat: u === 'alice' ? 'web' : 'api' })); return c; };
+  const s1 = sess('alice', 'ta');
+  check('session hello with v:2 is accepted', last(s1, 'welcome')?.mode === 'session' && s1.meta.v === 2);
+  const s2 = sess('alice', 'ta');
+  check('live duplicate session is refused', last(s2, 'error')?.code === 'duplicate' && s2.closed?.c === 4006);
+  s1.activity = clock - 80000; // silent for 80 s: a zombie
+  const s3 = sess('alice', 'ta');
+  check('zombie session is replaced (old closed 4008)', s1.closed?.c === 4008 && last(s3, 'welcome')?.mode === 'session');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

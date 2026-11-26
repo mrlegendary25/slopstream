@@ -13,6 +13,7 @@ import { invitePage, gonePage, landingPage } from './html.js';
 
 export const PROTOCOL = 2;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
+const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
 const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ACCEPT_FAIL_MAX = 10;
@@ -353,7 +354,13 @@ export class RelayCore {
     const link = this.findLink(user, chat);
     if (!link) { conn.send({ t: 'error', code: 'not_linked', message: `chat "${chat}" has no link; pair it with the slopstream CLI` }); return conn.close(4005, 'not linked'); }
     const k = key(user, chat);
-    if (this.online.has(k)) { conn.send({ t: 'error', code: 'duplicate', message: 'this chat is already connected elsewhere' }); return conn.close(4006, 'duplicate'); }
+    if (this.online.has(k)) {
+      // A half-dead socket (laptop slept, wifi changed) can hold the slot for minutes. If the old one has been silent for
+      // longer than any live client would be (heartbeat is 25 s), the new connection takes over.
+      const old = this.conns.get(this.online.get(k));
+      if (old && now - old.lastActivity() > ZOMBIE_MS) { old.close(4008, 'replaced'); this.onClose(old); }
+      else { conn.send({ t: 'error', code: 'duplicate', message: 'this chat is already connected elsewhere' }); return conn.close(4006, 'duplicate'); }
+    }
     meta.mode = 'session'; meta.chat = chat; meta.linkId = link.id;
     conn.saveMeta();
     this.online.set(k, meta.id);
