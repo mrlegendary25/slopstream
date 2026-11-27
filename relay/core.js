@@ -388,8 +388,11 @@ export class RelayCore {
 
     // POST: needs the signed-in browser session AND the page's own csrf token. Anything else leaves the request pending.
     const forbidden = () => html(403, messagePage('Not allowed', 'This request could not be verified. Nothing was changed. Open the link from your terminal again.'), STRICT);
-    const origin = (req.headers || {}).origin;
-    if (origin && this.config.publicUrl && origin !== new URL(this.config.publicUrl).origin) return forbidden();
+    // Firefox and Safari send `Origin: null` for a same-site form post when the page says referrer-policy no-referrer, so
+    // "null" can't be refused. The real defences are the SameSite cookie and the secret csrf token below; this is an extra check.
+    const h = req.headers || {};
+    if (h.origin && h.origin !== 'null' && this.config.publicUrl && h.origin !== new URL(this.config.publicUrl).origin) return forbidden();
+    if (h['sec-fetch-site'] === 'cross-site') return forbidden();
     if (!mine) return forbidden();
     const form = new URLSearchParams(req.body || '');
     const given = Buffer.from(String(form.get('csrf') || '')), want = Buffer.from(cf.csrf);
