@@ -1,0 +1,43 @@
+name: Release
+
+# Publishes to npm when a version tag (v1.2.3) is pushed. Uses npm trusted publishing (OIDC), so there is
+# no long-lived npm token anywhere, and every release carries a provenance attestation.
+# One-time setup on npmjs.com: package settings → Trusted publishing → GitHub Actions,
+# repository mrlegendary25/slopstream, workflow release.yml, environment npm.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use an npm with trusted publishing
+        run: npm install -g npm@11.6.2
+      - name: Tag matches package.json and plugin.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          plugin=$(node -p "require('./.claude-plugin/plugin.json').version")
+          echo "tag=$tag package.json=$pkg plugin.json=$plugin"
+          [ "$tag" = "$pkg" ] && [ "$tag" = "$plugin" ]
+      - run: npm ci
+      - run: npm test
+      - run: npm publish --provenance --access public
