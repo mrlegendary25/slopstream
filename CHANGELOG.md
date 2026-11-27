@@ -2,6 +2,11 @@
 
 All notable changes to Slopstream are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+- Duplicate and legacy commands, leaving one way to do each thing: `pair-create`, `pair-accept` and `invite` (use `link`, `join`, `link --add`), `cancel` (use `deny`), `whoami` and `status` (use `doctor`), `simulate` (use `demo`), and `force-clean` / `force-stop-clean`. `/slopstream:status` is now `/slopstream:doctor`.
+
 ## [0.3.0] - 2026-11-28
 
 Finishes the zero-friction setup, and closes the gap where a tricked agent with a shell could link your chat.

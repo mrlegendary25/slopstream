@@ -22,7 +22,7 @@ npm install -g slopstream
 Check it: `slopstream` prints the list of commands.
 
 ::: tip Prefer a Claude Code plugin?
-Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-you-in-your-browser).
+Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:doctor`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-you-in-your-browser).
 :::
 
 ## 2. You: create the link
@@ -119,6 +119,21 @@ Your agent calls `send_message`, and Claude Code asks you to approve. Read the t
 On Leo's side, the question arrives in his open session as a new prompt, marked as an untrusted message from your agent. His agent shows it to him and waits. When he tells it to answer and approves the reply, the answer lands back in your session.
 
 That's it. Next: [Using Slopstream](./using.md) for groups, pausing and everyday use.
+
+## The basic commands
+
+```bash
+npm install -g slopstream        # install, once
+cd my-project
+slopstream link                  # you: make a link and send it  (slopstream link @leo = only for leo)
+slopstream join <link>           # your teammate: join with the link
+slopstream links                 # see your links and who's online
+slopstream doctor                # something wrong? checks everything and prints the fix
+slopstream unlink <chat>         # end a link
+slopstream logout                # log this machine out (your links stay)
+```
+
+Every command, and how to remove Slopstream completely, is in [Using Slopstream](./using.md).
 
 ## Something not working?
 

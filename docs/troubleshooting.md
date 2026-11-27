@@ -14,7 +14,7 @@ It checks every step, from your login to whether your teammate is online, and pr
 | **version** | A newer slopstream is out: `npm install -g slopstream@latest` (Claude plugin users: `/plugin update slopstream`). |
 | **login** | You haven't logged in on this machine: `slopstream login`. |
 | **token** | Your saved login couldn't be read, usually because the system keychain is locked or the item was deleted. Unlock the keychain, or run `slopstream login` again. |
-| **relay** | Can't reach the relay. Check your internet connection, then the relay address (`slopstream whoami` shows it; `slopstream login --relay <url>` changes it). |
+| **relay** | Can't reach the relay. Check your internet connection, then the relay address (`slopstream doctor` shows it; `slopstream login --relay <url>` changes it). |
 | **protocol** | The relay is older than this slopstream. If you run it yourself, update it. |
 | **auth** | The relay rejected your login (revoked device, or the wrong relay): `slopstream login`. |
 | **folder** | This folder isn't set up, or its setup points at a file that's gone (npx's temporary cache, or an old install). Run `npm install -g slopstream`, then `slopstream init <chat>`. |
@@ -26,8 +26,6 @@ It checks every step, from your login to whether your teammate is online, and pr
 | **session** | Informational: whether this chat's own agent session is running. If not, start it the way the doctor tells you. |
 | **claude** | Claude Code is missing or older than 2.1.80: `claude update`. |
 | **codex** | Codex is missing, or the folder's hook is: `slopstream init <chat> --agent codex`. |
-
-`slopstream status` is the shorter, machine-wide version of the same checks.
 
 ## Installing and logging in
 
@@ -64,7 +62,7 @@ It checks every step, from your login to whether your teammate is online, and pr
 
 **`link_status` says the chat isn't linked**: the folder's label doesn't match a link. Run `slopstream links`, then `slopstream init <the-linked-label>` in the folder.
 
-**`connectedToRelay: false`**: you're offline, the relay is unreachable, or your login was revoked. Run `slopstream status` and `slopstream whoami`.
+**`connectedToRelay: false`**: you're offline, the relay is unreachable, or your login was revoked. Run `slopstream doctor`.
 
 **Moved the project folder**: run `slopstream init <chat>` in its new location.
 
@@ -85,7 +83,7 @@ For Codex-specific problems, see [Codex](./codex.md#message-not-arriving-in-code
 **Can't reach the relay:**
 1. Is the relay running, and its machine awake?
 2. Can you open `http(s)://<relay>/healthz` in a browser from the machine that can't connect? You should see `{"ok":true,...}`.
-3. Is the address right in `slopstream whoami`? Use `wss://` behind TLS, `ws://` only on a network you trust.
+3. Is the address right? (`slopstream doctor` shows it.) Use `wss://` behind TLS, `ws://` only on a network you trust.
 4. Firewalls: on macOS, allow incoming connections for `node` when asked; on Windows, allow it in Windows Defender Firewall.
 
 **`error: auth: bad user or token`**: wrong username or token (check for stray spaces). The relay admin can `remove-user` and `add-user` again to issue a new token.

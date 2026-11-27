@@ -3,10 +3,8 @@
 // Deliberately NOT available to the agent.
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { execSync } from 'node:child_process';
 import { loadConfig, saveConfig, deleteSecret, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
@@ -15,9 +13,7 @@ import { RelayError, explain } from './errors.js';
 import { detectAgents, chooseAgent, describeChoice } from './agents.js';
 import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
-import { runStatus } from './status.js';
 import { runDoctor } from './doctor.js';
-import { runSimulate } from './simulate.js';
 import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 
 const args = process.argv.slice(2);
@@ -94,54 +90,6 @@ async function waitConfirming(ws, cfg, types, mine, retryHint, firstTimeout = 0)
 
 const loadHuman = () => loadConfig(defaultHome(), { migrate: true }); // human commands only: moves an old plain-file token into the keychain
 const needCfg = () => loadHuman() || die('Not set up. Run: slopstream login');
-
-// The relay writes a pidfile on start (relay/server.js). That is the primary lookup and works on
-// every OS. `pgrep` stays as a Unix-only fallback so a relay started before pidfiles existed, or
-// wrapped in `caffeinate ... node relay/server.js`, is still found.
-function relayPidFiles(relayData) {
-  const files = [path.join(os.homedir(), '.slopstream-relay.pid')];
-  if (relayData) files.unshift(path.join(relayData, 'relay.pid'));
-  if (process.env.DATA_DIR) files.push(path.join(path.resolve(process.env.DATA_DIR), 'relay.pid'));
-  return files;
-}
-
-function readPidFile(f) {
-  try {
-    const pid = Number(JSON.parse(fs.readFileSync(f, 'utf8')).pid);
-    if (!pid || pid === process.pid) return 0;
-    process.kill(pid, 0); // throws if the process is gone, i.e. a stale pidfile
-    return pid;
-  } catch { return 0; }
-}
-
-function findRelayPids(relayData) {
-  const pids = new Set();
-  for (const f of relayPidFiles(relayData)) { const pid = readPidFile(f); if (pid) pids.add(pid); }
-  if (process.platform !== 'win32') {
-    try {
-      execSync("pgrep -f 'relay/server\\.js'", { encoding: 'utf8' })
-        .split('\n').map((s) => Number(s.trim()))
-        .filter((pid) => pid && pid !== process.pid)
-        .forEach((pid) => pids.add(pid));
-    } catch { /* pgrep exits non-zero when nothing matches */ }
-  }
-  return [...pids];
-}
-
-async function stopRunningRelays(relayData) {
-  const pids = findRelayPids(relayData);
-  if (!pids.length) { console.log('No running relay process found on this machine.'); return; }
-  console.log(`Stopping running relay process(es): ${pids.join(', ')}`);
-  for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
-  await new Promise((r) => setTimeout(r, 1500));
-  for (const pid of findRelayPids(relayData)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
-}
-
-function wipeEverything({ home, relayData }) {
-  fs.rmSync(home, { recursive: true, force: true });
-  fs.rmSync(relayData, { recursive: true, force: true });
-  console.log('Done. Everything reset to zero.\nStart fresh with: node relay/admin.js add-user <name>, then slopstream setup ...');
-}
 
 async function main() {
   switch (cmd) {
@@ -224,13 +172,6 @@ async function main() {
       await runLogin({ relay: opt('relay') });
       break;
     }
-    case 'whoami': {
-      const cfg = needCfg();
-      console.log(`${cfg.user} on ${cfg.relay}`);
-      try { (await admin(cfg)).close(); console.log('✓ login works'); }
-      catch (e) { console.error(`✗ ${e instanceof RelayError ? explain(e.code, e.message) : e.message}`); process.exit(1); }
-      break;
-    }
     case 'devices': {
       const cfg = needCfg(); const ws = await admin(cfg);
       if (rest[0] === 'revoke') {
@@ -260,47 +201,6 @@ async function main() {
       console.log('Logged out.');
       break;
     }
-    case 'pair-create':
-    case 'invite': {
-      requireHuman(cmd);
-      // pair-create makes a NEW link; invite adds a person to a chat that is ALREADY linked (up to the relay's group limit).
-      const isInvite = cmd === 'invite';
-      const chat = rest[0];
-      if (!chat) die(isInvite ? 'usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)' : 'usage: slopstream pair-create <chat-label> [--yes]');
-      const pcfg = needCfg();
-      const ws = await admin(pcfg);
-      const viaBrowser = await browserConfirms(pcfg);
-      ws.send(JSON.stringify({ t: isInvite ? 'invite_create' : 'pair_create', chat }));
-      const c = await nextMsg(ws, ['pair_code']);
-      const mine = (m) => normCode(m.code) === normCode(c.code);
-      const until = new Date(Date.now() + c.expiresInSec * 1000).toLocaleString();
-      console.log(`\n${isInvite ? 'Invite' : 'Pairing'} code for chat "${chat}":  ${c.code}   (valid until ${until})`);
-      if (c.url) console.log(`Link to send:  ${c.url}`);
-      console.log(`They run:  slopstream pair-accept ${c.code} <their-chat-label>\nWaiting...`);
-      const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
-      process.on('SIGINT', stays);
-      ws.on('close', stays);
-      const req = await nextMsg(ws, ['pair_request'], 0, mine);
-      console.log(`\n${req.from.user}${req.from.github ? ` (github.com/${req.from.github})` : ''} wants to ${isInvite ? `join "${chat}"` : `link their chat "${req.from.chat}" to your chat "${chat}"`}${isInvite ? ` (their chat label: "${req.from.chat}")` : ''}.`);
-      const ok = viaBrowser || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
-      ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await waitConfirming(ws, pcfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${req.code}`);
-      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
-      ws.off('close', stays); process.off('SIGINT', stays);
-      ws.close(); break;
-    }
-    case 'pair-accept': {
-      requireHuman(cmd);
-      const [code, chat] = rest; if (!code || !chat) die('usage: slopstream pair-accept <code> <chat-label>');
-      const acfg = needCfg();
-      const ws = await admin(acfg);
-      ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      const w = await waitConfirming(ws, acfg, ['pair_waiting'], (m) => normCode(m.code) === normCode(code), `Run the same command again: slopstream pair-accept ${code} ${chat}`, 8000);
-      console.log(`${w.message.charAt(0).toUpperCase()}${w.message.slice(1)}. You can close this; once approved the link appears in: slopstream links`);
-      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === normCode(code));
-      console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied by the other side.');
-      ws.close(); break;
-    }
     case 'requests': {
       const ws = await admin(needCfg());
       ws.send(JSON.stringify({ t: 'list_requests' }));
@@ -327,7 +227,15 @@ async function main() {
       ws.send(JSON.stringify({ t: 'list_requests' }));
       const { invites } = await nextMsg(ws, ['requests'], 5000);
       const v = invites.find(x => normCode(x.code) === normCode(code));
-      if (!v || !v.requester) die(v ? `Nobody has used invite ${v.code} yet.` : `No open invite ${code}.`);
+      if (!v) die(`No open invite ${code}.`);
+      if (!v.requester) {
+        if (cmd === 'approve') die(`Nobody has used invite ${v.code} yet.`);
+        // `deny` on an invite nobody used withdraws it.
+        ws.send(JSON.stringify({ t: 'invite_cancel', code: v.code }));
+        const c = await nextMsg(ws, ['invite_cancelled'], 5000);
+        console.log(`Withdrew invite ${c.code}.`);
+        ws.close(); break;
+      }
       let ok = false;
       if (cmd === 'approve') {
         const r = v.requester;
@@ -339,14 +247,6 @@ async function main() {
       ws.send(JSON.stringify({ t: 'pair_decision', code: v.code, ok }));
       const r = await done;
       console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
-      ws.close(); break;
-    }
-    case 'cancel': {
-      const code = rest[0]; if (!code) die('usage: slopstream cancel <code>');
-      const ws = await admin(needCfg());
-      ws.send(JSON.stringify({ t: 'invite_cancel', code }));
-      const r = await nextMsg(ws, ['invite_cancelled'], 5000);
-      console.log(`Cancelled invite ${r.code}.`);
       ws.close(); break;
     }
     case 'links': {
@@ -408,38 +308,7 @@ async function main() {
       } catch { /* silent */ }
       break;
     }
-    case 'force-clean':
-    case 'force-stop-clean': {
-      // Nukes everything back to zero: this machine's saved login/pauses/logs, AND the relay's
-      // users/links/audit log. Does NOT touch the npm link (the `slopstream` command stays installed).
-      // force-stop-clean additionally finds and kills any running relay/server.js process first.
-      const stopFirst = cmd === 'force-stop-clean';
-      const home = opt('home') ? path.resolve(opt('home')) : defaultHome();
-      const relayData = opt('relay-data')
-        ? path.resolve(opt('relay-data'))
-        : (process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(os.homedir(), '.slopstream-relay'));
-      console.log(`This will PERMANENTLY delete:
-  - this machine's saved login, pauses and logs:  ${home}
-  - the relay's data (ALL users, ALL links, audit log):  ${relayData}
-
-The "slopstream" command itself (the npm link) is NOT removed.`);
-      console.log(stopFirst
-        ? 'Any running relay process on this machine will be stopped first.'
-        : "If the relay is running, stop it first (Ctrl+C) -- deleting its data while it's running can corrupt it.\n(Or run slopstream force-stop-clean to have this done for you.)");
-      const ok = yes || /^yes$/i.test((await ask('Type "yes" to continue: ')).trim());
-      if (!ok) { console.log('Aborted. Nothing was deleted.'); break; }
-      if (stopFirst) await stopRunningRelays(relayData);
-      wipeEverything({ home, relayData });
-      break;
-    }
-    case 'status': process.exitCode = await runStatus(); break;
     case 'doctor': process.exitCode = await runDoctor({ chat: opt('chat'), json: args.includes('--json') }); break;
-    case 'simulate': {
-      const chat = opt('chat'); if (!chat) die('usage: slopstream simulate --chat <chat-label> [--agent claude|codex]');
-      if (opt('home')) process.env.SLOPSTREAM_HOME = path.resolve(opt('home'));
-      await runSimulate({ chat, agent: opt('agent') || 'claude', linger: opt('linger') !== undefined ? Number(opt('linger')) : undefined });
-      return new Promise(() => {}); // runSimulate exits the process itself
-    }
     case 'demo': {
       const sub = rest[0];
       if (sub === 'up') await demoUp({ dir: opt('dir'), a: opt('a') || 'claude', b: opt('b') || 'claude', c: opt('c'), port: opt('port') ? Number(opt('port')) : 18787 });
@@ -454,35 +323,21 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
 
 usage: slopstream <command>
   link [@user] [chat] [--agent ..] [--add]   make an invite link for this folder and wait for your teammate
-                                      (with @user, only that person can use it)
+                                      (with @user, only that person can use it; --add adds a person to an existing link)
   join <code-or-link> [chat]         link this folder to a teammate's invite
+  requests                           invites made for you, your open invites, and who has used them
+  approve <code> [--yes]             let in someone who used your invite (also later, after you closed link)
+  deny <code>                        refuse such a request, or withdraw an invite nobody used
+  links                              your links, and who is online in each
+  unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
+  pause <chat> / resume <chat>       stop / restart a chat connecting to the relay, without unlinking it
+  init <chat> [--agent claude|codex] (in a project folder) re-wire this folder for Claude Code or Codex
+  doctor [--chat <label>] [--json]   check every step (login, relay, this folder, link) and print the fix for each problem
   login [--relay <url>]              log in with GitHub (once per machine)
-  whoami                             show who you are logged in as and check it works
   devices [revoke <id>]              list (or revoke) the devices logged in as you
   logout                             revoke this device and forget the login
-  setup <relay-url> <user> <token>   save credentials of a self-hosted relay (once per machine)
-  pair-create <chat> [--yes]         make a pairing code for a chat, wait for teammate, approve
-  pair-accept <code> <chat>          accept a teammate's code for one of your chats
-  invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)
-  requests                           list your open invites and who has used them
-  approve <code> [--yes]             approve someone who used your invite (also works later, after you closed pair-create)
-  deny <code>                        refuse such a request
-  cancel <code>                      cancel an open invite
-  links                              list your links (and who else is in each group)
-  unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
-  pause <chat>                       stop a chat connecting to the relay, without unlinking it
-  resume <chat>                      undo pause
-  force-clean [--yes] [--relay-data <dir>] [--home <dir>]
-                                      DANGER: wipe this machine's login/pauses/logs AND the relay's
-                                      users/links/audit log back to zero. Keeps the npm link.
-  force-stop-clean [--yes] [--relay-data <dir>] [--home <dir>]
-                                      same as force-clean, but first finds and kills any running
-                                      relay/server.js process on this machine.
-  init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
-  status                             is this machine ready? who is online?
-  doctor [--chat <label>] [--json]   check every step (login, relay, this folder, link) and print the fix for each problem
-  demo up|status|peer|down           test everything on THIS machine alone (see docs/testing.md)
-  simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
+  setup <relay-url> <user> <token>   self-hosted relay without GitHub: save the token its admin gave you
+  demo up|status|peer|down           test everything on THIS machine alone (see docs/testing.md)`);
   }
 }
 const quiet = cmd === 'codex-hook' || cmd === 'simulate' || (cmd === 'demo' && rest[0] === 'peer');
