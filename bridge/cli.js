@@ -12,6 +12,7 @@ import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
 import { maybeNotifyUpdate } from './update-check.js';
 import { RelayError, explain } from './errors.js';
+import { detectAgents, chooseAgent, describeChoice } from './agents.js';
 import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runStatus } from './status.js';
@@ -41,8 +42,16 @@ function defaultChat(cwd) {
 }
 
 // Wire this folder up and say what to do next. Called BEFORE waiting, so the folder is ready even if the terminal closes.
-function initFolder(chat) {
-  const r = runInit({ chat, agent: opt('agent') || 'claude', cwd: process.cwd(), home: opt('home') });
+// Which agent this folder is for: --agent, else what's installed and what the folder already has (bridge/agents.js).
+async function pickAgent() {
+  const choice = await chooseAgent({ flag: opt('agent'), detected: detectAgents({ cwd: process.cwd() }), isTTY: !!(process.stdin.isTTY && process.stdout.isTTY), ask });
+  if (!opt('agent')) console.log(describeChoice(choice));
+  for (const w of choice.warnings) console.log(`WARNING: ${w}`);
+  return choice.agent;
+}
+
+async function initFolder(chat) {
+  const r = runInit({ chat, agent: await pickAgent(), cwd: process.cwd(), home: opt('home') });
   console.log(`Set up ${r.agent} in ${process.cwd()}: wrote ${r.written.join(' and ')}`);
   for (const w of r.warnings || []) console.log(`WARNING: ${w}`);
   return r;
@@ -160,7 +169,7 @@ async function main() {
         const peers = peersOf(mineLink.members.filter(m => !(m.user === cfg.user && m.chat === chat)));
         die(`"${chat}" is already linked with ${peers}. To add another person to that group, run: slopstream link --add`);
       }
-      const init = args.includes('--no-init') ? null : initFolder(chat);
+      const init = args.includes('--no-init') ? null : await initFolder(chat);
       ws.send(JSON.stringify({ t: add ? 'invite_create' : 'pair_create', chat, ...(target ? { for: target } : {}) }));
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
@@ -201,7 +210,7 @@ async function main() {
       console.log(`Link this folder (chat "${chat}") with @${inv.inviter}'s chat "${inv.chat}"?\nTheir agent will be able to send messages here; you approve each one.`);
       const viaBrowser = await browserConfirms(cfg);
       if (!viaBrowser && !yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
-      const init = args.includes('--no-init') ? null : initFolder(chat);
+      const init = args.includes('--no-init') ? null : await initFolder(chat);
       const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
       await waitConfirming(ws, cfg, ['pair_waiting'], (m) => normCode(m.code) === code, 'Run the same command again: slopstream join ' + input, 8000);
@@ -375,7 +384,7 @@ async function main() {
     }
     case 'init': {
       const chat = rest[0]; if (!chat) die('usage: slopstream init <chat-label> [--agent claude|codex]   (run inside the project folder)');
-      const r = runInit({ chat, agent: opt('agent') || 'claude', cwd: process.cwd(), home: opt('home') });
+      const r = runInit({ chat, agent: await pickAgent(), cwd: process.cwd(), home: opt('home') });
       console.log(`Set up ${r.agent} in ${process.cwd()}: wrote ${r.written.join(' and ')}`);
       for (const w of r.warnings || []) console.log(`WARNING: ${w}`);
       if (r.agent === 'claude') console.log('Start the linked session with:\n  claude --dangerously-load-development-channels server:slopstream');

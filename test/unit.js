@@ -7,6 +7,7 @@ import { migrate, MIGRATIONS } from '../relay/migrations.js';
 import { FileKV } from '../relay/kv-file.js';
 import { MemKV } from '../relay/kv-mem.js';
 import { RelayCore, configFromEnv } from '../relay/core.js';
+import { detectAgents, chooseAgent, describeChoice } from '../bridge/agents.js';
 import { makeSecretStore } from '../bridge/secrets.js';
 import { saveConfig, loadConfig, secretAccount, deleteSecret } from '../bridge/config.js';
 import { ERRORS, RelayError, explain } from '../bridge/errors.js';
@@ -172,6 +173,39 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   loadConfig(home3, { store: broken, migrate: true });
   check('migration keeps the file token when the read-back fails', JSON.parse(fs.readFileSync(path.join(home3, 'config.json'), 'utf8')).token === TOKEN);
   for (const h of [home, home2, home3]) fs.rmSync(h, { recursive: true, force: true });
+}
+
+// --- agent detection ---
+{
+  const runWith = (have) => (cmd) => (have[cmd] ? { status: 0, stdout: `${cmd} ${have[cmd]}\n`, stderr: '' } : { status: null, stdout: '', stderr: '', error: new Error('ENOENT') });
+  const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ss-agents-'));
+  const det = (have, files = [], dirs = []) => { const d = dir(); for (const f of files) fs.writeFileSync(path.join(d, f), ''); for (const x of dirs) fs.mkdirSync(path.join(d, x)); return detectAgents({ cwd: d, run: runWith(have) }); };
+  const both = { claude: '2.1.90', codex: '0.5.0' };
+
+  check('detect: reads installed versions', det(both).installed.claude.text === '2.1.90' && det({ claude: '2.1.90' }).installed.codex === null);
+  check('detect hint: .codex/ means codex', det(both, [], ['.codex']).hint === 'codex');
+  check('detect hint: .mcp.json means claude', det(both, ['.mcp.json']).hint === 'claude');
+  check('detect hint: CLAUDE.md means claude', det(both, ['CLAUDE.md']).hint === 'claude');
+  check('detect hint: both or neither means null', det(both, ['CLAUDE.md'], ['.codex']).hint === null && det(both).hint === null);
+
+  const pick = (o) => chooseAgent({ isTTY: false, ask: async () => '', ...o });
+  check('--agent always wins', (await pick({ flag: 'codex', detected: det({ claude: '2.1.90' }) })).agent === 'codex');
+  check('exactly one installed: claude', (await pick({ detected: det({ claude: '2.1.90' }) })).agent === 'claude');
+  check('exactly one installed: codex', (await pick({ detected: det({ codex: '0.5.0' }) })).agent === 'codex');
+  check('both installed: the folder hint wins', (await pick({ detected: det(both, [], ['.codex']) })).agent === 'codex');
+  let asked = 0;
+  const tty = await pick({ detected: det(both), isTTY: true, ask: async () => { asked++; return '2'; } });
+  check('both installed, no hint, TTY: asks, and takes the answer', asked === 1 && tty.agent === 'codex');
+  check('both installed, no hint, TTY: Enter means Claude', (await pick({ detected: det(both), isTTY: true, ask: async () => '' })).agent === 'claude');
+  asked = 0;
+  const notty = await pick({ detected: det(both), isTTY: false, ask: async () => { asked++; return '2'; } });
+  check('both installed, no hint, no TTY: claude without asking', asked === 0 && notty.agent === 'claude');
+  const none = await pick({ detected: det({}) });
+  check('none installed: claude plus a warning with the install link', none.agent === 'claude' && /Install one first/.test(none.warnings[0] || '') && /https:\/\//.test(none.warnings[0]));
+  const old = await pick({ detected: det({ claude: '2.0.5' }) });
+  check('old Claude Code: warns that channels need 2.1.80', old.agent === 'claude' && /2\.1\.80/.test(old.warnings.join()) && /claude update/.test(old.warnings.join()));
+  check('new enough Claude Code: no warning', (await pick({ detected: det({ claude: '2.1.80' }) })).warnings.length === 0);
+  check('the chosen agent is always announced with how to override', /Using Codex .*--agent claude/.test(describeChoice({ agent: 'codex', why: 'x' })));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
