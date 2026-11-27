@@ -20,8 +20,8 @@
   "author": "mrlegendary25",
   "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "ws": "8.22.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ws": "8.23.0",
     "zod": "4.6.7"
   },
   "type": "module",
