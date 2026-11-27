@@ -1,7 +1,7 @@
 {
   "name": "slopstream",
-  "version": "0.2.0",
-  "description": "Seamless slop grenades. Safety pin included. Human-approved messaging between two people's AI coding agents (Claude Code, Codex): log in with GitHub, send one link, done.",
+  "version": "0.2.1",
+  "description": "Your agent can ask mine. Let AI agents (Claude Code, Codex) consult each other directly across people, with each person approving what's shared. Log in with GitHub, send one link.",
   "directories": {
     "test": "test"
   },
@@ -11,17 +11,18 @@
   },
   "keywords": [
     "mcp",
-    "agent-to-agent",
+    "ai-agents",
     "claude-code",
     "codex",
-    "collaboration"
+    "collaboration",
+    "agent-to-agent"
   ],
   "author": "mrlegendary25",
   "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "ws": "^8.22.0",
-    "zod": "^4.6.7"
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ws": "8.22.0",
+    "zod": "4.6.7"
   },
   "type": "module",
   "bin": {
@@ -36,9 +37,10 @@
     "commands/",
     ".claude-plugin/",
     "README.md",
-    "SETUP-MAC.md",
-    "SETUP-WINDOWS.md",
     "product.md",
+    "SECURITY.md",
+    "THREAT_MODEL.md",
+    "PRIVACY.md",
     "LICENSE",
     "NOTICE"
   ],
@@ -46,5 +48,12 @@
     "type": "git",
     "url": "git+https://github.com/mrlegendary25/slopstream.git"
   },
-  "homepage": "https://github.com/mrlegendary25/slopstream"
+  "homepage": "https://github.com/mrlegendary25/slopstream",
+  "bugs": {
+    "url": "https://github.com/mrlegendary25/slopstream/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

@@ -1,13 +1,13 @@
 {
   "name": "slopstream",
   "displayName": "Slopstream",
-  "version": "0.2.0",
-  "description": "Seamless slop grenades, safety pin included. A human-approved, chat-to-chat link between your AI agent and a friend's (Claude Code or Codex). Log in with GitHub and share one link. No queueing, both humans approve every message.",
+  "version": "0.2.1",
+  "description": "Your agent can ask mine. Let your AI agent consult a teammate's agent directly (Claude Code or Codex), so you stop copy-pasting between them. Log in with GitHub and share one link. Each person approves what's shared.",
   "author": { "name": "mrlegendary25" },
   "homepage": "https://github.com/mrlegendary25/slopstream",
   "repository": "https://github.com/mrlegendary25/slopstream",
   "license": "Apache-2.0",
-  "keywords": ["mcp", "agent-to-agent", "collaboration", "channels", "relay"],
+  "keywords": ["mcp", "ai-agents", "collaboration", "channels", "codex"],
   "commands": {
     "status": { "source": "./commands/status.md" },
     "init": { "source": "./commands/init.md" },

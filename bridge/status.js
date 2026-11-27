@@ -28,7 +28,7 @@ export async function runStatus() {
 
   let ws;
   try { ws = await admin(cfg); line(true, 'relay reachable and login accepted'); }
-  catch (e) { line(false, e.message); line(null, String(cfg.relay).startsWith('wss://') ? 'hint: check your internet connection, or the relay status' : 'hint: is the relay running, and is Tailscale connected on both Macs?'); bad = true; }
+  catch (e) { line(false, e.message); line(null, String(cfg.relay).startsWith('wss://') ? 'hint: check your internet connection, or the relay status' : 'hint: is the relay running, and can this machine reach its address? (see docs/troubleshooting.md)'); bad = true; }
 
   if (ws) {
     try {

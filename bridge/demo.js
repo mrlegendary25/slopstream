@@ -1,5 +1,5 @@
 // `slopstream demo up|status|peer|down`: a complete two-person test on THIS laptop.
-//   - a private relay on 127.0.0.1 running in the background (no Tailscale, no second person)
+//   - a private relay on 127.0.0.1 running in the background (no network setup, no second person)
 //   - two fake people, "demo-a" and "demo-b", each with their own settings folder
 //   - one link between them (chat label "demo")
 //   - two project folders, each wired up for an agent (claude or codex)

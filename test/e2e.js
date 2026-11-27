@@ -57,7 +57,7 @@ check('init writes .mcp.json entry "slopstream" with SLOPSTREAM_CHAT and the bri
   entry?.env?.SLOPSTREAM_CHAT === 'projX' && /bridge[\\/]server\.js$/.test(entry?.args?.[0] || ''));
 const mdText = fs.readFileSync(path.join(projDir, 'CLAUDE.md'), 'utf8');
 check('init adds the safety-rules block exactly once (idempotent)', (mdText.match(/<!-- slopstream:start -->/g) || []).length === 1 && /ANOTHER PERSON'S AI AGENT/.test(mdText));
-check('help text carries the tagline', /seamless slop grenades/i.test(execFileSync('node', [CLI], { encoding: 'utf8' })));
+check('help text carries the tagline', /your agent can ask mine/i.test(execFileSync('node', [CLI], { encoding: 'utf8' })));
 
 // 4. bridges
 async function startBridge(home, chat) {

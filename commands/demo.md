@@ -6,7 +6,7 @@ allowedTools: ["Bash"]
 
 The user wants to run `slopstream demo` with arguments: $ARGUMENTS (default to "status" if nothing was given).
 
-This only touches `~/.slopstream-demo` and a private local relay; it never touches the user's real login or a real friend, so it's safe to run directly.
+This only touches `~/.slopstream-demo` and a private local relay; it never touches the user's real login or a real teammate, so it's safe to run directly.
 
 1. If `${CLAUDE_PLUGIN_ROOT}/node_modules` does not exist yet, first run (quietly):
    `npm install --prefix "${CLAUDE_PLUGIN_ROOT}"`
