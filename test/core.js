@@ -304,6 +304,17 @@ function world(env = {}, kv2 = newKv()) {
   const e2 = adm('eli', 'sst_eli');
   for (let i = 0; i < 6; i++) sy5(e2, { t: 'pair_accept', code: codes5[i % 5], chat: 'x' + i });
   check('at most 5 open confirms per user (too_many_confirms)', e2.sent.filter(m => m.t === 'confirm_required').length === 5 && last(e2, 'error')?.code === 'too_many_confirms', JSON.stringify(e2.sent.map(m => m.t + ':' + (m.code || ''))));
+  for (const [k] of kv5.list('confirm:')) kv5.del(k);
+  {
+    // POST /c/<id> as a signed-in browser would send it, with various Origin headers
+    const mkConfirm = () => { const d = adm('dana', 'sst_dana'), e = adm('eli', 'sst_eli'); sy5(d, { t: 'pair_create', chat: 'o' + Math.random().toString(36).slice(2, 7) }); const c = last(d, 'pair_code').code; sy5(e, { t: 'pair_accept', code: c, chat: 'q' + Math.random().toString(36).slice(2, 7) }); return last(e, 'confirm_required'); };
+    const cookie = 'ss_web=' + core5.signSession({ u: 'eli', gh: 8, exp: clock + 1e6 });
+    const tryPost = async (headers) => { const k = mkConfirm(); const cf = kv5.get('confirm:' + k.id); return (await core5.handleHttp({ method: 'POST', path: '/c/' + k.id, headers: { cookie, ...headers }, body: `csrf=${cf.csrf}&decision=deny`, ip: '' })).status; };
+    check('confirm POST with Origin: null (Firefox/Safari) is accepted', await tryPost({ origin: 'null' }) === 200);
+    check('confirm POST with the relay origin is accepted', await tryPost({ origin: 'https://r.test' }) === 200);
+    check('confirm POST from another origin is refused', await tryPost({ origin: 'https://evil.test' }) === 403);
+    check('confirm POST marked cross-site is refused', await tryPost({ 'sec-fetch-site': 'cross-site' }) === 403);
+  }
 }
 
 // ---- T6: directed invites ----
