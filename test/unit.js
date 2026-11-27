@@ -1,6 +1,8 @@
 // Unit tests for client-side helpers. No network. Run: node test/unit.js
 process.env.SLOPSTREAM_KEYCHAIN = 'off';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { migrate, MIGRATIONS } from '../relay/migrations.js';
@@ -206,6 +208,17 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   check('old Claude Code: warns that channels need 2.1.80', old.agent === 'claude' && /2\.1\.80/.test(old.warnings.join()) && /claude update/.test(old.warnings.join()));
   check('new enough Claude Code: no warning', (await pick({ detected: det({ claude: '2.1.80' }) })).warnings.length === 0);
   check('the chosen agent is always announced with how to override', /Using Codex .*--agent claude/.test(describeChoice({ agent: 'codex', why: 'x' })));
+}
+
+// --- admin stats ---
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-stats-'));
+  const kv = new FileKV(d); const day = new Date().toISOString().slice(0, 10);
+  kv.put('stats:' + day, { msgs: 3, active: ['some-link-id'] });
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL('../relay/admin.js', import.meta.url)), 'stats'], { env: { ...process.env, DATA_DIR: d }, encoding: 'utf8' });
+  let rep = null; try { rep = JSON.parse(r.stdout); } catch { /* checked below */ }
+  check('admin.js stats prints the report from the data dir (counts only)', rep?.wal === 1 && rep.days[0].msgs === 3 && !r.stdout.includes('some-link-id'), r.stdout + r.stderr);
+  fs.rmSync(d, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

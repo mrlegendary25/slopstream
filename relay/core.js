@@ -58,10 +58,32 @@ export function configFromEnv(env) {
     maxDevices: num(env.MAX_DEVICES, 20),
     maxLinks: num(env.MAX_LINKS, 50),
     minClientVersion: str(env.MIN_CLIENT_VERSION, ''),
+    statsToken: str(env.STATS_TOKEN, ''),
     githubClientSecret: str(env.GITHUB_CLIENT_SECRET, ''),
     confirmLinks: str(env.CONFIRM_LINKS, 'auto'), // auto: on when GitHub login is fully configured; on: required; off: never
     confirmTtlMs: num(env.CONFIRM_TTL_MS, 10 * 60 * 1000),
   };
+}
+
+// ---- Privacy-safe daily counters (D6). Counts only: never a user name, a chat label, a link id or any message content. ----
+const STAT_FIELDS = ['logins', 'accounts', 'invites', 'links', 'msgs', 'undelivered', 'activated'];
+const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+// Weekly active links (WAL) = distinct links with at least one delivered message in the last 7 days.
+// The per-day `active` arrays hold link ids inside the store, but the report only ever carries their counts.
+export function statsReport(kv, now = Date.now()) {
+  const days = kv.list('stats:').map(([k, v]) => [k.slice('stats:'.length), v]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const weekFrom = dayOf(now - 6 * 86400000);
+  const wal = new Set();
+  const act = { accounts: 0, activated: 0 };
+  const out = days.map(([date, v]) => {
+    if (date >= weekFrom) { for (const id of v.active || []) wal.add(id); act.accounts += v.accounts || 0; act.activated += v.activated || 0; }
+    const row = { date };
+    for (const f of STAT_FIELDS) row[f] = v[f] || 0;
+    row.activeLinks = (v.active || []).length;
+    return row;
+  });
+  return { days: out, wal: wal.size, activation7d: act };
 }
 
 export class RelayCore {
@@ -138,6 +160,8 @@ export class RelayCore {
     for (const [k, inv] of this.kv.list('invite:')) if (inv.exp < now) this.kv.del(k);
     for (const [k, d] of this.kv.list('devauth:')) if (d.exp < now) this.kv.del(k);
     for (const [k, o] of this.kv.list('oauth:')) if (o.exp < now) this.kv.del(k);
+    const statsKeep = dayOf(now - 90 * 86400000);
+    for (const [k] of this.kv.list('stats:')) if (k.slice('stats:'.length) < statsKeep) this.kv.del(k);
     const keepFrom = new Date(now - 2 * 86400000).toISOString().slice(0, 10); // daily directed-invite counters live two days
     for (const [k] of this.kv.list('dirinv:')) if (k.split(':').pop() < keepFrom) this.kv.del(k);
     for (const [k, cf] of this.kv.list('confirm:')) {
@@ -184,6 +208,7 @@ export class RelayCore {
     if (method === 'GET' && path === '/') return html(200, landingPage());
     if (path.startsWith('/c/') && (method === 'GET' || method === 'POST')) return this.confirmPageRoute(req);
     if (method === 'GET' && path === '/v1/auth/github/callback') return this.githubCallback(req);
+    if (method === 'GET' && path === '/v1/stats') return this.statsRoute(req);
     if (method === 'POST' && (path === '/v1/auth/github/start' || path === '/v1/auth/github/poll')) {
       let body = {};
       try { body = req.body ? JSON.parse(req.body) : {}; } catch { return json(400, { status: 'error', code: 'bad_json' }); }
@@ -268,6 +293,7 @@ export class RelayCore {
       }
       this.kv.put('account:' + name, { name, ghId: who.id, ghLogin: who.login, createdAt: now });
       this.kv.put('gh:' + who.id, name);
+      this.bump('accounts');
     } else {
       // The relay username never changes after creation (links reference it), even if the person renames on GitHub.
       const acc = this.kv.get('account:' + name);
@@ -282,6 +308,7 @@ export class RelayCore {
     const deviceId = crypto.randomUUID();
     this.kv.put('device:' + hashToken(token), { id: deviceId, user: name, label: d.label, createdAt: now, lastSeenAt: now });
     this.kv.del(key);
+    this.bump('logins');
     this.audit({ ev: 'login', user: name, deviceId });
     return json(200, { status: 'ok', user: name, token, device_id: deviceId });
   }
@@ -398,6 +425,21 @@ export class RelayCore {
     return { action: 'approve', other: { user: inv.requester.user, github: this.githubOf(inv.requester.user) }, theirChat: inv.requester.chat, myChat: inv.chat };
   }
 
+  // Off unless STATS_TOKEN is set. A wrong token counts against the same per-IP limiter as a wrong login.
+  statsRoute(req) {
+    const want = this.config.statsToken;
+    if (!want) return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
+    const now = this.now();
+    const ip = req.ip || '';
+    const fails = (this.authFails.get(ip) || []).filter(t => now - t < AUTH_FAIL_WINDOW_MS);
+    this.authFails.set(ip, fails);
+    if (ip && fails.length >= AUTH_FAIL_MAX) return json(429, { status: 'error', code: 'rate_limited' });
+    const given = /^Bearer (.+)$/.exec((req.headers || {}).authorization || '')?.[1] || '';
+    const a = crypto.createHash('sha256').update(given).digest(), b = crypto.createHash('sha256').update(want).digest();
+    if (!crypto.timingSafeEqual(a, b)) { fails.push(now); return json(401, { status: 'error', code: 'auth' }); }
+    return json(200, statsReport(this.kv, now));
+  }
+
   async githubCallback(req) {
     const c = this.config;
     const q = new URLSearchParams(req.query || '');
@@ -429,6 +471,19 @@ export class RelayCore {
     const exp = this.now() + SESSION_MS;
     const cookie = [`ss_web=${this.signSession({ u: cf.user, gh: cf.ghId, exp })}`, 'HttpOnly', 'SameSite=Lax', 'Path=/', `Max-Age=${SESSION_MS / 1000}`, ...(c.publicUrl.startsWith('https:') ? ['Secure'] : [])].join('; ');
     return { status: 302, headers: { location: `/c/${o.confirmId}`, 'set-cookie': cookie, 'cache-control': 'no-store' }, body: '' };
+  }
+
+  bump(field, n = 1) {
+    const k = 'stats:' + dayOf(this.now());
+    const d = this.kv.get(k) || {};
+    d[field] = (d[field] || 0) + n;
+    this.kv.put(k, d);
+  }
+  markActive(linkId) {
+    const k = 'stats:' + dayOf(this.now());
+    const d = this.kv.get(k) || {};
+    d.active = d.active || [];
+    if (!d.active.includes(linkId)) { d.active.push(linkId); this.kv.put(k, d); }
   }
 
   // ---- helpers ----
@@ -467,6 +522,7 @@ export class RelayCore {
     const inv = { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null, ...(forUser ? { forUser } : {}) };
     this.kv.put('invite:' + code, inv);
     if (dayKey) this.kv.put(dayKey, (this.kv.get(dayKey) || 0) + 1);
+    this.bump('invites');
     const url = `${publicUrl}/j/${displayCode(code)}`;
     conn.send({ t: 'pair_code', code: displayCode(code), url, expiresInSec: inviteTtlMs / 1000 });
     // If the named person has a terminal open, they see it at once. Same reply to the sender either way.
@@ -646,6 +702,7 @@ export class RelayCore {
     } else {
       link = { id: crypto.randomUUID(), members: [{ user: inv.user, chat: inv.chat }, { user: req.user, chat: req.chat }], createdAt: new Date(this.now()).toISOString() };
       this.links.push(link);
+      this.bump('links');
     }
     this.saveLinks();
     this.audit({ ev: inv.groupId ? 'member_added' : 'paired', linkId: link.id, by: user, added: { user: req.user, chat: req.chat } });
@@ -799,10 +856,17 @@ export class RelayCore {
     if (!target) return nack(others.length > 1 ? 'ambiguous_target' : 'unknown_recipient');
 
     const pw = this.connOf(target.user, target.chat);
-    if (!pw) { this.audit({ ev: 'undelivered_offline', from: user, to: target.user, linkId: link.id }); return nack('peer_offline'); }
+    if (!pw) { this.bump('undelivered'); this.audit({ ev: 'undelivered_offline', from: user, to: target.user, linkId: link.id }); return nack('peer_offline'); }
     const out = { t: 'msg', id: m.id, from: user, fromChat: chat, fromAgent: conn.meta.agent, contextId: String(m.contextId || m.id), parts: [{ kind: 'text', text }] };
     pw.send(out);
     this.audit({ ev: 'msg', linkId: link.id, from: user, to: target.user, id: m.id, contextId: out.contextId, text });
     conn.send({ t: 'ack', id: m.id, delivered: true, to: target.user });
+    this.bump('msgs'); this.markActive(link.id);
+    // Activation: a GitHub account's first delivered message, sent within 24 h of signing up.
+    const acc = this.kv.get('account:' + user);
+    if (acc && !acc.firstMsgAt) {
+      acc.firstMsgAt = this.now(); this.kv.put('account:' + user, acc);
+      if (acc.firstMsgAt - acc.createdAt <= 86400000) this.bump('activated');
+    }
   }
 }

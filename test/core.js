@@ -1,7 +1,7 @@
 // Unit tests for RelayCore: no network, no files. Run: node test/core.js
 process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 import crypto from 'node:crypto';
-import { RelayCore, configFromEnv } from '../relay/core.js';
+import { RelayCore, configFromEnv, statsReport } from '../relay/core.js';
 import { MemKV } from '../relay/kv-mem.js';
 
 let pass = 0, fail = 0;
@@ -369,6 +369,61 @@ function world(env = {}, kv2 = newKv()) {
   const aliceNew = sess7('alice', 'ta', 'web', 3);
   for (const status of ['accepted', 'inbox', 'shown', 'read']) core7.onMessage(bobS, JSON.stringify({ t: 'receipt', id: 'm3', status, to: 'alice' }));
   check('v3 sender receives every status in order', aliceNew.sent.filter(m => m.t === 'receipt').map(m => m.status).join() === 'accepted,inbox,shown,read');
+}
+
+// ---- T10: counters and /v1/stats ----
+{
+  const T0 = Date.UTC(2026, 5, 10, 12, 0, 0);
+  let t = T0;
+  const kv10 = new MemKV({ users: { legacy1: sha('l1'), legacy2: sha('l2') } });
+  const mkAcc = (n, id, tok, createdAt) => { kv10.put('account:' + n, { name: n, ghId: id, ghLogin: n, createdAt }); kv10.put('gh:' + id, n); kv10.put('device:' + sha(tok), { id: 'dev-' + n, user: n, label: 'x', createdAt, lastSeenAt: createdAt }); };
+  mkAcc('zoe', 1, 'sst_zoe', T0 - 3600000);            // signed up 1 h ago
+  mkAcc('yan', 2, 'sst_yan', T0 - 3 * 86400000);        // signed up 3 days ago
+  mkAcc('xia', 3, 'sst_xia', T0 - 3600000);
+  kv10.put('links', [
+    { id: 'LINK-A-secret', members: [{ user: 'zoe', chat: 'zoechat' }, { user: 'yan', chat: 'yanchat' }], createdAt: 'x' },
+    { id: 'LINK-B-secret', members: [{ user: 'xia', chat: 'xiachat' }, { user: 'yan', chat: 'yanchat2' }], createdAt: 'x' },
+  ]);
+  const core10 = new RelayCore({ kv: kv10, config: configFromEnv({ STATS_TOKEN: 'sekrit' }), now: () => t });
+  const sess = (u, tok, chat) => { const c = new FakeConn(); core10.openConn(c, { ip: '10.0.0.1' }); core10.onMessage(c, JSON.stringify({ t: 'hello', v: 3, user: u, token: tok, chat })); return c; };
+  const say10 = (c, o) => core10.onMessage(c, JSON.stringify(o));
+  const zoe = sess('zoe', 'sst_zoe', 'zoechat'), yan = sess('yan', 'sst_yan', 'yanchat'), xia = sess('xia', 'sst_xia', 'xiachat'), yan2 = sess('yan', 'sst_yan', 'yanchat2');
+  const today = () => kv10.get('stats:' + new Date(t).toISOString().slice(0, 10));
+
+  say10(zoe, { t: 'msg', id: 'a1', parts: [{ kind: 'text', text: 'hi' }] });
+  say10(zoe, { t: 'msg', id: 'a2', parts: [{ kind: 'text', text: 'hi again' }] });
+  check('delivered message counts msgs and marks the link active', today().msgs === 2 && today().active.length === 1 && today().active[0] === 'LINK-A-secret');
+  check('activation counted once per account, only within 24 h', today().activated === 1 && kv10.get('account:zoe').firstMsgAt === T0);
+  say10(yan, { t: 'msg', id: 'b1', parts: [{ kind: 'text', text: 'late' }] }); // yan signed up 3 days ago
+  check('a first message after 24 h is not an activation', today().activated === 1 && !!kv10.get('account:yan').firstMsgAt);
+  say10(xia, { t: 'msg', id: 'c1', parts: [{ kind: 'text', text: 'second link' }] });
+  check('a second link is activated and counted separately', today().activated === 2 && today().active.length === 2);
+  yan2.close(4000); core10.onClose(yan2);
+  say10(xia, { t: 'msg', id: 'c2', parts: [{ kind: 'text', text: 'nobody home' }] });
+  check('peer_offline counts undelivered (and not msgs)', today().undelivered === 1 && today().msgs === 4);
+
+  // earlier days: the same link on several days, plus an old link
+  kv10.put('stats:2026-06-08', { msgs: 40, active: ['LINK-A-secret', 'LINK-OLD-secret'], accounts: 2, activated: 1 });
+  kv10.put('stats:2026-06-09', { msgs: 40, active: ['LINK-A-secret'] });
+  kv10.put('stats:2026-05-20', { msgs: 9, active: ['LINK-ANCIENT-secret'] });
+  const rep = statsReport(kv10, t);
+  check('wal counts distinct links over 7 days, not messages', rep.wal === 3 && rep.days.find(d => d.date === '2026-06-08').activeLinks === 2, JSON.stringify(rep));
+  check('activation7d sums accounts and activated over 7 days', rep.activation7d.activated === 3 && rep.activation7d.accounts === 2, JSON.stringify(rep.activation7d));
+  const flat = JSON.stringify(rep);
+  check('report contains no user names, chat labels or link ids', !/zoe|yan|xia|legacy|chat|LINK-|secret|sst_/i.test(flat.replace(/activation|activated|activeLinks/g, '')), flat);
+
+  const get10 = (headers, ip = '9.9.9.9') => core10.handleHttp({ method: 'GET', path: '/v1/stats', headers, body: '', ip });
+  const off = new RelayCore({ kv: new MemKV(), config: configFromEnv({}), now: () => t });
+  check('/v1/stats is 404 without STATS_TOKEN', (await off.handleHttp({ method: 'GET', path: '/v1/stats', headers: { authorization: 'Bearer x' }, body: '', ip: '' })).status === 404);
+  check('/v1/stats is 401 with no or a wrong token', (await get10({})).status === 401 && (await get10({ authorization: 'Bearer nope' })).status === 401);
+  const good = await get10({ authorization: 'Bearer sekrit' });
+  check('/v1/stats is 200 with the right token and returns the report', good.status === 200 && JSON.parse(good.body).wal === 3);
+  let last429 = 0; for (let i = 0; i < 30; i++) last429 = (await get10({ authorization: 'Bearer wrong' }, '8.8.8.8')).status;
+  check('wrong stats tokens are rate limited per IP', last429 === 429);
+
+  t += 100 * 86400000; core10.sweep();
+  check('stats older than 90 days are swept', kv10.list('stats:').length === 0 || kv10.list('stats:').every(([k]) => k.slice(6) >= new Date(t - 90 * 86400000).toISOString().slice(0, 10)));
+  check('...including the ancient one', !kv10.get('stats:2026-05-20'));
 }
 
 // ---- T2: client version gate ----
