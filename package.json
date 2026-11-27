@@ -1,7 +1,7 @@
 {
   "name": "slopstream",
-  "version": "0.1.0",
-  "description": "Seamless slop grenades. Safety pin included. Direct, human-approved messaging between two Claude Code chats.",
+  "version": "0.2.0",
+  "description": "Seamless slop grenades. Safety pin included. Human-approved messaging between two people's AI coding agents (Claude Code, Codex): log in with GitHub, send one link, done.",
   "directories": {
     "test": "test"
   },
@@ -9,8 +9,14 @@
     "relay": "node relay/server.js",
     "test": "node test/core.js && node test/e2e.js && node test/codex.js && node test/group.js && node test/login.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "agent-to-agent",
+    "claude-code",
+    "codex",
+    "collaboration"
+  ],
+  "author": "mrlegendary25",
   "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -20,5 +26,25 @@
   "type": "module",
   "bin": {
     "slopstream": "bridge/cli.js"
-  }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bridge/",
+    "relay/*.js",
+    "commands/",
+    ".claude-plugin/",
+    "README.md",
+    "SETUP-MAC.md",
+    "SETUP-WINDOWS.md",
+    "product.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrlegendary25/slopstream.git"
+  },
+  "homepage": "https://github.com/mrlegendary25/slopstream"
 }

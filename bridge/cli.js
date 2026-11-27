@@ -56,7 +56,7 @@ async function ensureLoggedIn(relay) {
   return loadConfig() || await runLogin({ relay });
 }
 
-const needCfg = () => loadConfig() || die('Not set up. Run: slopstream setup <relay-url> <your-user> <your-token>');
+const needCfg = () => loadConfig() || die('Not set up. Run: slopstream login');
 
 // The relay writes a pidfile on start (relay/server.js). That is the primary lookup and works on
 // every OS. `pgrep` stays as a Unix-only fallback so a relay started before pidfiles existed, or

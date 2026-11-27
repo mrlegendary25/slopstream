@@ -24,5 +24,5 @@ export function logLine(obj, home = defaultHome()) {
   } catch { /* logging must never break the bridge */ }
 }
 
-// Where `slopstream login` goes when nothing else says otherwise. (Becomes the hosted relay in Phase 1 / T8.)
-export const DEFAULT_RELAY = process.env.SLOPSTREAM_RELAY || 'ws://127.0.0.1:8787';
+// Where `slopstream login` goes when nothing else says otherwise. (The hosted relay.)
+export const DEFAULT_RELAY = process.env.SLOPSTREAM_RELAY || 'wss://slopstream-relay.slopstream.workers.dev';

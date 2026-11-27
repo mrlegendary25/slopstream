@@ -64,7 +64,7 @@ const INSTRUCTIONS = PUSH
     ].join('\n');
 
 const mcp = new Server(
-  { name: 'slopstream', version: '0.3.0' },
+  { name: 'slopstream', version: '0.4.0' },
   {
     capabilities: { tools: {}, ...(PUSH ? { experimental: { 'claude/channel': {} } } : {}) },
     instructions: INSTRUCTIONS,
