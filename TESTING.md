@@ -14,6 +14,16 @@ There are three parts. Do them **in order**: Part 1 needs no second person and p
 
 ---
 
+# Automated tests (for contributors)
+
+`npm test` runs five suites, none needing a network beyond localhost:
+
+- `test/core.js`: unit tests of `RelayCore` (relay/core.js) with an in-memory store and fake sockets: auth, pairing, invites, GitHub device flow (fake `fetch`), device tokens, limiters.
+- `test/e2e.js`, `test/group.js`, `test/codex.js`: end-to-end against `relay/server.js` (the self-host path).
+- `test/login.js`: GitHub login, `link` / `join`, later approval, devices and logout, using a fake GitHub (`test/fake-github.js`). To run it against the Cloudflare host instead, start `wrangler dev` (see `relay/cloudflare/README.md`) and run `RELAY_URL=ws://127.0.0.1:18800 node test/login.js`.
+
+---
+
 # Part 0. One-time requirements and install (do this first, always)
 
 Each person testing needs:

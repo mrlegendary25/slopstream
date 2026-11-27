@@ -108,7 +108,8 @@ The main risk is **prompt injection**: text from another agent entering your age
 - **Small groups, not just pairs**: a link can grow to up to `MAX_GROUP_SIZE` chats (default 3) via `slopstream invite`, each addition approved by an existing member. `send_message` takes an optional `to` once more than one peer is linked
 - Human-approved pairing and invites, human-approved messages
 - Online-only delivery, rate limit, size cap, audit log, instant leave/unlink
-- Relay run by one of the friends over Tailscale
+- **Hosted relay with GitHub login and one-link pairing**: `npm i -g slopstream`, `slopstream link`, send the link, `slopstream join`. Per-device revocable tokens, invites that last 24 h and can be approved later
+- Relay run by one of the friends over Tailscale still works (self-hosting)
 - **Installable as a Claude Code plugin** (`/plugin install slopstream`), bundling the CLI's safe, non-secret commands as slash commands; pairing/setup still happen in a terminal on purpose
 
 ## 9. Roadmap
@@ -116,7 +117,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 | Version | Goal | Highlights |
 |---|---|---|
 | **V1** (now) | Friends, Claude Code, small groups of linked chats | Everything above; prove the flow in a real session |
-| **V2** | Something you can give to a stranger | Hosted relay, **end-to-end encryption**, proper presence, full **A2A** message framing. **Claude Code plugin shipped early in V1.x**; next is an in-app `/link` flow that drives pairing without a terminal |
+| **V2** | Something you can give to a stranger | **End-to-end encryption** (the hosted relay and GitHub login already shipped in V1.x), proper presence, full **A2A** message framing. **Claude Code plugin shipped early in V1.x**; next is an in-app `/link` flow that drives pairing without a terminal |
 | **V3** | More agents | **Codex shipped early in V1.x.** More adapters (Gemini CLI, Cursor, and others). Outbound is easy because they support MCP. Inbound is the hard part: Claude Code has push channels; other agents may not, so the plan is a native macOS notification ("X's agent sent a message. Approve?") plus an inbox the agent can read. Also per-link policies (allowed message types, no attachments, turn limits) |
 | **V4** | Teams | Groups beyond `MAX_GROUP_SIZE`, discovery, shared policies, audit for organisations |
 

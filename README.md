@@ -41,11 +41,47 @@
 - **Only while both are online.** Nothing is queued, so nobody's agent can get pinged at 3 a.m.
 - **One chat to one chat, or a small, explicit group.** Not "anyone can message my Claude". A link can grow to a few people (default up to 3, configurable), with every addition approved by someone already in it.
 
-**New here? Start with the fast path for your machine, commands only, no explanations: [SETUP-MAC.md](./SETUP-MAC.md) or [SETUP-WINDOWS.md](./SETUP-WINDOWS.md).** This file is the full how-to with explanations and reference material. For what Slopstream is and why it exists, see [product.md](./product.md).
+## Quick start
+
+Two people, two minutes, no servers to run. You need Node 20+ and Claude Code (or Codex).
+
+```
+Alice (in her project folder):   npm install -g slopstream
+                                 slopstream link          # logs in with GitHub, prints https://<relay>/j/k7x2m-9qp4r
+Bob (opens the link, then):      npm install -g slopstream
+                                 slopstream join k7x2m-9qp4r   # logs in with GitHub, Alice approves, done
+```
+
+- **`slopstream link`** logs you in with GitHub (first time only), wires up the current folder, and prints a link to send to your friend. It waits for them to join and asks you to approve. Closed the terminal? The invite stays valid for 24 hours; approve later with `slopstream requests` / `slopstream approve <code>`.
+- **`slopstream join <code-or-link>`** logs you in, wires up your folder, and asks the inviter to approve. Both commands must be typed by a person in a terminal; an agent cannot run them.
+
+Then start the session with the command the CLI prints (for Claude Code: `claude --dangerously-load-development-channels server:slopstream`).
+
+Running your own relay instead (Tailscale, no GitHub)? See [Self-hosting](#self-hosting-tailscale--your-own-relay) below, or the fast paths [SETUP-MAC.md](./SETUP-MAC.md) / [SETUP-WINDOWS.md](./SETUP-WINDOWS.md). What the hosted relay stores: [PRIVACY.md](./PRIVACY.md). Found a vulnerability? [SECURITY.md](./SECURITY.md). For what Slopstream is and why it exists, see [product.md](./product.md).
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `slopstream link [chat] [--add]` | Log in if needed, wire up this folder, make an invite link, wait and approve |
+| `slopstream join <code-or-link> [chat]` | Accept a friend's invite for this folder |
+| `slopstream requests` / `approve <code>` / `deny <code>` / `cancel <code>` | Handle your open invites later |
+| `slopstream login` / `whoami` / `logout` | GitHub login on this machine |
+| `slopstream devices [revoke <id>]` | See or revoke the devices logged in as you |
+| `slopstream links` / `unlink <chat>` / `pause <chat>` / `resume <chat>` | Manage links |
+| `slopstream status` | Is this machine ready? |
+
+The full list (including the self-host commands) is in [Reference](#12-reference).
 
 ---
 
+# Self-hosting (Tailscale + your own relay)
+
+Everything below is the long guide for running **your own relay** over Tailscale with admin-created tokens. It still works exactly as before. If you just want to link agents, use the Quick start above.
+
 ## Contents
+
+Quick start is above. The numbered sections are the self-hosting guide and the reference.
 
 1. [How the pieces fit together](#1-how-the-pieces-fit-together)
 2. [Before you start](#2-before-you-start)
@@ -453,8 +489,9 @@ Setup, pairing and `init` are one-time. The relay host's machine has to be awake
 
 | Command | What it does |
 |---|---|
-| `slopstream setup <relay-url> <user> <token>` | Save your login (once per machine) |
-| `slopstream pair-create <chat> [--yes]` | Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
+| `slopstream link`, `join`, `requests`, `approve`, `deny`, `cancel`, `login`, `whoami`, `logout`, `devices` | Hosted-relay flow; see the Quick start |
+| `slopstream setup <relay-url> <user> <token>` | **[self-host]** Save your login (once per machine) |
+| `slopstream pair-create <chat> [--yes]` | **[self-host]** Make a pairing code and wait for the friend; you approve. `--yes` skips the prompt |
 | `slopstream pair-accept <code> <chat>` | Accept a friend's code for one of your chats |
 | `slopstream invite <chat> [--yes]` | Add another person to a chat that's **already** linked, up to the relay's `MAX_GROUP_SIZE` |
 | `slopstream links` | List your links (and who else is in each group) |

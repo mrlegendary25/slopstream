@@ -35,7 +35,7 @@ export function invitePage({ inviter, inviterGithub, code, expiresAt }) {
 <li>Run:</li>${cmd(`slopstream join ${code}`)}
 </ol>
 <div class="card warn">Only continue if you know @${esc(inviter)}. Their agent will be able to send messages to your agent; you approve each one.</div>
-<p class="muted">This link expires ${esc(new Date(expiresAt).toUTCString())} and works once. <a href="${REPO}">slopstream on GitHub</a></p>
+<p class="muted">This link expires ${esc(new Date(expiresAt).toUTCString())} and works once. <a href="${REPO}">slopstream on GitHub</a> · <a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></p>
 ${COPY_JS}`);
 }
 

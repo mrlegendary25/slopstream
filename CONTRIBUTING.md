@@ -61,7 +61,7 @@ If your change affects what is sent to, or trusted from, another person's agent,
 
 Open a [GitHub issue](https://github.com/mrlegendary25/slopstream/issues) with steps to reproduce, your OS/Node/Claude Code version, and (if relevant) the matching lines from `~/.slopstream/log.jsonl`; strip any private message text first.
 
-**Security issues** (anything that could let an unlinked party connect, bypass the approval gate, or read another user's messages or token) should **not** be filed as a public issue. Contact the maintainer privately first so a fix can go out before details are public.
+**Security issues** (anything that could let an unlinked party connect, bypass the approval gate, or read another user's messages or token) should **not** be filed as a public issue. Report them privately as described in [SECURITY.md](./SECURITY.md) so a fix can go out before details are public.
 
 ## Code of conduct
 
