@@ -34,11 +34,11 @@ cli('a', 'setup', RELAY, 'aarush', tok.aarush);
 check('bad token rejected at setup', (() => { try { cli('x', 'setup', RELAY, 'himnish', 'wrong'); return false; } catch { return true; } })());
 
 // 3. pairing through the real CLI (creator approves)
-const creator = spawn('node', [path.join(ROOT, 'bridge/cli.js'), 'pair-create', 'projX', '--yes'], { env: env('h') });
+const creator = spawn('node', [path.join(ROOT, 'bridge/cli.js'), 'link', 'projX', '--yes', '--no-init'], { env: env('h') });
 let out = ''; creator.stdout.on('data', d => out += d);
-const code = (await waitFor(() => out.match(/projX":\s+([a-z2-9]{5}-[a-z2-9]{5})/)))?.[1];
+const code = (await waitFor(() => out.match(/\/j\/([a-z2-9]{5}-[a-z2-9]{5})/)))?.[1];
 check('pair code issued', !!code, out);
-const accepted = cli('a', 'pair-accept', code, 'projX');
+const accepted = cli('a', 'join', code, 'projX', '--yes', '--no-init');
 await waitFor(() => /Linked/.test(out));
 check('pairing approved + linked on both sides', /Linked/.test(accepted) && /Linked/.test(out), accepted + out);
 check('links listed', /projX\s+<->\s+aarush\/projX/.test(cli('h', 'links')));

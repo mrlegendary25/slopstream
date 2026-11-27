@@ -59,7 +59,7 @@ check('config has auth:github and an sst_ token', cfgA.auth === 'github' && cfgA
 check('config keeps working with tokenStore file', JSON.parse(fs.readFileSync(path.join(home('alice'), 'config.json'), 'utf8')).tokenStore === 'file');
 const lb = await login('bob', 2, 'Bob'); const lc = await login('carol', 3, 'Carol');
 check('bob and carol log in', /Logged in as bob/.test(lb.out) && /Logged in as carol/.test(lc.out));
-check('whoami shows alice', /alice/.test(run('alice', TMP, 'whoami').out));
+check('devices works while logged in', run('alice', TMP, 'devices').code === 0);
 
 // 4-7. link + join
 const pA = proj('A'), pB = proj('B'), pC = proj('C'), pD = proj('D');
@@ -125,6 +125,13 @@ const joinBobDir = start('bob', proj('H'), 'join', urlDir, 'dirjoin', '--yes');
 const [cd1, cd2] = await Promise.all([linkDir.exit, joinBobDir.exit]);
 check('bob joins with it and both print Linked!', cd1 === 0 && cd2 === 0 && /Linked!/.test(joinBobDir.out()), linkDir.out() + joinBobDir.out());
 
+// 10c. deny withdraws an invite nobody used
+const linkWd = start('alice', proj('I'), 'link', 'wd', '--yes', '--no-init');
+const urlWd = (await waitFor(() => linkWd.out().match(/https?:\/\/\S+\/j\/[a-z2-9]{5}-[a-z2-9]{5}/)))?.[0];
+const wd = run('alice', TMP, 'deny', urlWd.split('/j/')[1]);
+check('deny withdraws an invite nobody used', /Withdrew invite/.test(wd.out) && (await fetch(urlWd)).status === 404, wd.out);
+linkWd.p.kill('SIGKILL');
+
 // 11. human-only guard
 const guard = spawnSync('node', [CLI, 'join', 'aaaaa-bbbbb'], { cwd: pD, env: { ...env('carol'), SLOPSTREAM_ALLOW_NONINTERACTIVE: '' }, encoding: 'utf8' });
 check('join without a TTY is refused', guard.status === 1 && /must be typed by a person/.test(guard.stderr), guard.stderr);
@@ -133,7 +140,7 @@ check('join without a TTY is refused', guard.status === 1 && /must be typed by a
 const dv = run('alice', TMP, 'devices');
 check('devices shows this device', /\(this device\)/.test(dv.out), dv.out);
 const lo = run('alice', TMP, 'logout');
-check('logout works and whoami then fails', /Logged out/.test(lo.out) && run('alice', TMP, 'whoami').code === 1);
+check('logout works and commands then fail', /Logged out/.test(lo.out) && run('alice', TMP, 'devices').code === 1);
 const oldTok = await new Promise((res) => {
   const ws = new WebSocket(RELAY);
   ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', user: 'alice', token: cfgA.token })));

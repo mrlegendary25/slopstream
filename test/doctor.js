@@ -76,7 +76,6 @@ const bad = cli(folder, homeBad, 'doctor');
 check('bad token: auth ✗ suggests login', bad.code === 1 && /✗ the relay did not accept your login/.test(bad.out) && /→ slopstream login/.test(bad.out), bad.out);
 
 // status points at doctor
-check('status ends with a pointer to doctor', /Something wrong\? Run: slopstream doctor/.test(cli(folder, homeA, 'status').out));
 
 relay.kill();
 fs.rmSync(TMP, { recursive: true, force: true });

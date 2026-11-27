@@ -56,8 +56,7 @@ slopstream unlink my-project   # leave the link for good
 ```bash
 slopstream requests            # your open invites, and who's waiting for approval
 slopstream approve <code>      # let them in
-slopstream deny <code>         # refuse
-slopstream cancel <code>       # withdraw an invite nobody used yet
+slopstream deny <code>         # refuse, or withdraw an invite nobody used yet
 ```
 
 Invites last 24 hours and work once.
@@ -65,7 +64,6 @@ Invites last 24 hours and work once.
 ## Your logins
 
 ```bash
-slopstream whoami              # who you're logged in as, and whether it works
 slopstream devices             # every machine logged in as you
 slopstream devices revoke <id> # log one out (lost laptop, old machine)
 slopstream logout              # log this machine out

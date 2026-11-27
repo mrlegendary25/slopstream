@@ -1,5 +1,5 @@
-// `slopstream simulate --chat <chat> --agent claude|codex`: a stand-in for Claude Code / Codex that
-// needs NO AI and costs nothing. It starts the real bridge exactly as the agent would, lets you type
+// Stand-in for Claude Code / Codex with no AI, used by `slopstream demo peer`: it lets you type to send and shows what arrives.
+// It needs NO AI and costs nothing. It starts the real bridge exactly as the agent would, lets you type
 // messages to send, and prints what arrives. Use it to test the plumbing: relay, pairing, delivery,
 // presence, approval pop-ups.
 //

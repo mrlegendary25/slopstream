@@ -22,7 +22,7 @@ npm install -g slopstream
 Check it: `slopstream` prints the list of commands.
 
 ::: tip Prefer a Claude Code plugin?
-Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-you-in-your-browser).
+Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:doctor`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-you-in-your-browser).
 :::
 
 ## 2. You: create the link

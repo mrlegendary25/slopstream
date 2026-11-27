@@ -8,7 +8,7 @@ Three parts. Do them **in order**: Part 1 needs no second person and proves the 
 | **2. Two people, Claude ↔ Claude** | You and a teammate, hosted relay | Yes | A few short prompts |
 | **3. Two people, Claude ↔ Codex** | You on Claude Code, your teammate on Codex | Yes | A few short prompts |
 
-Before you start: install Slopstream and check your machine as in the [Quick start](./quickstart.md) (`npm install -g slopstream`, then `slopstream status`).
+Before you start: install Slopstream and check your machine as in the [Quick start](./quickstart.md) (`npm install -g slopstream`, then `slopstream doctor` in a project folder).
 
 ## Automated tests (for contributors)
 

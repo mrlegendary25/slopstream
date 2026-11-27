@@ -106,7 +106,7 @@ Device tokens and message text would travel unencrypted. Use TLS (`wss://`) for 
   ```
   Lost or leaked token: `node relay/admin.js remove-user leo`, then `add-user leo` again. `list-users` shows everyone.
 
-**4. Link.** Exactly as in the [Quick start](./quickstart.md): `slopstream link`, send the link, `slopstream join <link>`, approve. The older code-only commands (`slopstream pair-create <chat>` and `slopstream pair-accept <code> <chat>`) still work too.
+**4. Link.** Exactly as in the [Quick start](./quickstart.md): `slopstream link`, send the link, `slopstream join <link>`, approve.
 
 ## GitHub login and browser confirmation
 
@@ -158,4 +158,4 @@ Whoever runs the relay can read messages as they pass through (end-to-end encryp
 - **Node:** Ctrl+C in the relay's window. To delete everything: `rm -rf ~/.slopstream-relay`.
 - **Cloudflare:** `npx wrangler delete` from `relay/cloudflare`, then delete the OAuth App on GitHub.
 
-`slopstream force-stop-clean` stops a local Node relay **and wipes** its data and this machine's login. Only use it when you mean to start from zero.
+To reset this machine to zero, run `slopstream logout` and delete `~/.slopstream`.
