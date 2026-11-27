@@ -68,7 +68,7 @@ setInterval(() => {
 }, 15000).unref();
 setInterval(() => core.sweep(), 5000).unref();
 
-// Pidfile, so `slopstream stop` can find this process on any OS. The old lookup shelled out to
+// Pidfile, so `force-stop-clean` can find this process on any OS. The old lookup shelled out to
 // `pgrep`, which only exists on Unix. Written to the data dir and to a fixed path in the home
 // directory, because the CLI does not always know which DATA_DIR the relay was started with.
 const PIDFILES = [path.join(DATA, 'relay.pid'), path.join(os.homedir(), '.slopstream-relay.pid')];

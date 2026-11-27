@@ -106,7 +106,7 @@ check('carol\'s waiting join prints Linked!', (await joinC.exit) === 0 && /Linke
 
 // 10. used link
 const again = run('carol', pD, 'join', url2, 'x', '--yes');
-check('reusing a used link fails with a clear message', again.code === 1 && /expired|used|unknown/i.test(again.out), again.out);
+check('reusing a used link fails with a clear message', again.code === 1 && /expired|used|unknown/i.test(again.out) && again.out.includes('→'), again.out);
 check('GET /j/<code> of a used invite is 404', (await fetch(url2)).status === 404);
 
 // 11. human-only guard

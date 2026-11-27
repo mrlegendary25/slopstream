@@ -91,7 +91,7 @@ try {
   await inviteAndAccept(cfg.himnish, 'projX', cfg.nandan, 'projX');
   check('4th invite is rejected (group_full)', false, 'invite unexpectedly succeeded');
 } catch (e) {
-  check('4th invite is rejected (group_full)', /group_full/.test(e.message), e.message);
+  check('4th invite is rejected (group_full)', e.code === 'group_full', e.message);
 }
 
 // 7. aarush leaves: himnish and maya stay linked to each other; aarush is cut off, not queued/kept

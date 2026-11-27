@@ -3,6 +3,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { loadConfig, saveConfig, DEFAULT_RELAY } from './config.js';
 import { admin } from './net.js';
+import { RelayError } from './errors.js';
 import { httpBase, getJson, postJson } from './http.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -21,10 +22,10 @@ export async function runLogin({ relay } = {}) {
   const base = httpBase(relay);
   const info = await getJson(`${base}/v1/info`);
   if (!info.github) {
-    throw new Error(`This relay doesn't support GitHub login. Ask its admin for a token and run: slopstream setup ${relay} <user> <token>`);
+    throw new RelayError('github_disabled');
   }
   const start = await postJson(`${base}/v1/auth/github/start`, { label: `${os.hostname()} (${process.platform})` });
-  if (start.status !== 'started') throw new Error(`login could not start (${start.code || start.httpStatus})`);
+  if (start.status !== 'started') throw new RelayError(start.code || 'github_unavailable', start.message);
   console.log(`To log in, open  ${start.verification_uri}  and enter:  ${start.user_code}\nWaiting for GitHub...`);
   openBrowser(start.verification_uri);
 
@@ -43,9 +44,9 @@ export async function runLogin({ relay } = {}) {
     }
     if (r.status === 'denied') throw new Error('Login denied on GitHub.');
     if (r.status === 'expired') throw new Error('The login code expired. Run: slopstream login');
-    if (r.status === 'error' && r.code === 'name_taken') throw new Error(r.message);
+    if (r.status === 'error' && r.code === 'name_taken') throw new RelayError('name_taken', r.message);
     if (r.status === 'error' && r.httpStatus === 502) continue; // GitHub hiccup: keep trying until the deadline
-    throw new Error(`login failed (${r.code || r.status})`);
+    throw new RelayError(r.code || 'github_unavailable', r.message);
   }
   throw new Error('The login code expired. Run: slopstream login');
 }

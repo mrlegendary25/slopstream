@@ -10,6 +10,7 @@ import { execSync } from 'node:child_process';
 import { loadConfig, saveConfig, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
+import { RelayError, explain } from './errors.js';
 import { runLogin } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runStatus } from './status.js';
@@ -164,8 +165,8 @@ async function main() {
       }
       cfg = cfg || await runLogin({ relay: relayFromUrl || DEFAULT_RELAY });
       const inv = await getJson(`${httpBase(cfg.relay)}/v1/invite/${code}`);
-      if (inv.status === 'used') die('That invite was already used. Ask for a new one.');
-      if (inv.status !== 'open') die('That invite is unknown or has expired. Ask for a new one.');
+      if (inv.status === 'used') die(explain('bad_code', 'That invite was already used.'));
+      if (inv.status !== 'open') die(explain('bad_code', 'That invite is unknown or has expired.'));
       const chat = rest[1] || defaultChat(process.cwd());
       console.log(`Link this folder (chat "${chat}") with @${inv.inviter}'s chat "${inv.chat}"?\nTheir agent will be able to send messages here; you approve each one.`);
       if (!yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
@@ -186,7 +187,7 @@ async function main() {
       const cfg = needCfg();
       console.log(`${cfg.user} on ${cfg.relay}`);
       try { (await admin(cfg)).close(); console.log('✓ login works'); }
-      catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+      catch (e) { console.error(`✗ ${e instanceof RelayError ? explain(e.code, e.message) : e.message}`); process.exit(1); }
       break;
     }
     case 'devices': {
@@ -430,4 +431,4 @@ usage: slopstream <command>
   simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
   }
 }
-main().then(() => process.exit(process.exitCode || 0)).catch((e) => die(`error: ${e.message}`));
+main().then(() => process.exit(process.exitCode || 0)).catch((e) => die(e instanceof RelayError ? explain(e.code, e.message) : `error: ${e.message}`));

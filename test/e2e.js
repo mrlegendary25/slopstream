@@ -150,7 +150,7 @@ check('wrong token cannot impersonate', imp.some(m => m.code === 'auth'));
 await sleep(300);
 let used = 3, limited = null;
 for (let i = 0; i < 10; i++) { const x = await H.call('send_message', { text: 'm' + i }); if (!x.err) used++; else { limited = x.text; break; } }
-check('rate limit kicks in at 6 messages/window', used === 6 && /rate_limited/.test(limited || ''), `${used} ${limited}`);
+check('rate limit kicks in at 6 messages/window', used === 6 && /too fast/.test(limited || ''), `${used} ${limited}`);
 
 // 9b. pause: a local-only switch that stops a chat connecting, without touching the link itself
 await H.client.close();

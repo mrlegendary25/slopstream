@@ -27,6 +27,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import fs from 'node:fs';
 import { loadConfig, logLine, codexThreadFile, pausedFile } from './config.js';
 import { makeGate, notify } from './gate.js';
+import { explain, reasonCode } from './errors.js';
 
 const cfg = loadConfig();
 const CHAT = process.env.SLOPSTREAM_CHAT || path.basename(process.cwd());
@@ -170,10 +171,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     logLine({ dir: 'out', to: target.user, id, thread: contextId, delivered: result.delivered, reason: result.reason, text: body });
     return result.delivered
       ? text(`Delivered to ${target.user}'s agent. thread_id=${contextId} (message id ${id}; the other person may still accept or decline it, see link_status)`)
-      : text(`Not delivered: ${result.reason}`, true);
+      : text(`Not delivered: ${explainNack(result.reason, target.user)}`, true);
   }
   throw new Error(`unknown tool: ${name}`);
 });
+
+// A nack reason is a code, sometimes with detail ("too_long (max 8000 chars)"). Say it in words, with a next step.
+function explainNack(reason, peer) {
+  const code = reasonCode(reason);
+  if (code === 'peer_offline') return explain(code, `${peer} is offline right now. Nothing was queued.`);
+  return explain(code, reason === code ? undefined : String(reason));
+}
 
 // Stop a message from forging the <channel> wrapper or smuggling control characters.
 function sanitize(s) {

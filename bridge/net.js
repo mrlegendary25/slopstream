@@ -1,11 +1,12 @@
 // Small helpers for talking to the relay as a human-operated "admin" connection
 // (pairing, listing, unlinking). Used by the CLI, the demo and the tests.
 import WebSocket from 'ws';
+import { RelayError } from './errors.js';
 
 export function admin(cfg) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(cfg.relay);
-    ws.once('error', (e) => reject(new Error(`cannot reach relay ${cfg.relay}: ${e.message}`)));
+    ws.once('error', (e) => reject(new RelayError('unreachable', `Could not reach the relay at ${cfg.relay} (${e.message}).`)));
     let hb = null;
     ws.on('open', () => {
       ws.send(JSON.stringify({ t: 'hello', v: 2, user: cfg.user, token: cfg.token }));
@@ -17,7 +18,7 @@ export function admin(cfg) {
     const onMsg = (raw) => {
       const m = JSON.parse(raw.toString());
       if (m.t === 'welcome') { ws.off('message', onMsg); resolve(ws); }
-      else if (m.t === 'error') reject(new Error(`${m.code}: ${m.message}`));
+      else if (m.t === 'error') reject(new RelayError(m.code, m.message));
     };
     ws.on('message', onMsg);
   });
@@ -35,11 +36,11 @@ export const nextMsg = (ws, types, timeoutMs = 0, filter = null) => new Promise(
     const m = JSON.parse(raw.toString());
     if ((types.includes(m.t) && (!filter || filter(m))) || m.t === 'error') {
       ws.off('message', h); if (timer) clearTimeout(timer);
-      m.t === 'error' ? reject(new Error(`${m.code}: ${m.message}`)) : resolve(m);
+      m.t === 'error' ? reject(new RelayError(m.code, m.message)) : resolve(m);
     }
   };
   ws.on('message', h);
-  if (timeoutMs) timer = setTimeout(() => { ws.off('message', h); reject(new Error(`timed out waiting for ${types.join('/')}`)); }, timeoutMs);
+  if (timeoutMs) timer = setTimeout(() => { ws.off('message', h); reject(new RelayError('timeout', `The relay did not answer in time (waiting for ${types.join('/')}).`)); }, timeoutMs);
 });
 
 // Pair chatA (cfgA) with chatB (cfgB) without any human prompt. Used ONLY by the local demo and tests,
