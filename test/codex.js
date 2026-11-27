@@ -1,4 +1,5 @@
 // Codex + solo-demo tests: approval gate, receipts, Codex push via `codex queue`, inbox fallback,
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 // `init --agent codex`, and `demo up/peer/down`. Uses a FAKE `codex` binary and a scripted approver.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';

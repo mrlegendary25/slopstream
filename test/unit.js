@@ -7,6 +7,8 @@ import { migrate, MIGRATIONS } from '../relay/migrations.js';
 import { FileKV } from '../relay/kv-file.js';
 import { MemKV } from '../relay/kv-mem.js';
 import { RelayCore, configFromEnv } from '../relay/core.js';
+import { makeSecretStore } from '../bridge/secrets.js';
+import { saveConfig, loadConfig, secretAccount, deleteSecret } from '../bridge/config.js';
 import { ERRORS, RelayError, explain } from '../bridge/errors.js';
 import { VERSION, cmpVersion } from '../bridge/version.js';
 
@@ -84,6 +86,92 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   new FileKV(dir);
   check('FileKV deletes rotated audit files older than retention', !fs.existsSync(old) && fs.existsSync(path.join(dir, rotated[0])));
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// --- secret store (fake `run`, never a real keychain) ---
+{
+  const TOKEN = 'sst_' + 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd';
+  // A fake OS store: remembers what was written by account, records every call.
+  const fakeOs = (platform) => {
+    const calls = []; const vault = new Map();
+    const run = (cmd, args, input) => {
+      calls.push({ cmd, args: [...args], input });
+      if (platform === 'darwin') {
+        if (args[0] === 'help') return { status: 0, stdout: '', stderr: '' };
+        if (args[0] === '-i') { const m = /-a "([^"]+)" -w (\S+)/.exec(input || ''); if (!m) return { status: 1, stdout: '', stderr: 'bad' }; vault.set(m[1], m[2]); return { status: 0, stdout: '', stderr: '' }; }
+        if (args[0] === 'find-generic-password') { const v = vault.get(args[args.indexOf('-a') + 1]); return v ? { status: 0, stdout: v + '\n', stderr: '' } : { status: 44, stdout: '', stderr: '' }; }
+        if (args[0] === 'delete-generic-password') { vault.delete(args[args.indexOf('-a') + 1]); return { status: 0, stdout: '', stderr: '' }; }
+      }
+      if (platform === 'linux') {
+        if (args[0] === '--version') return { status: 0, stdout: 'secret-tool 0.20', stderr: '' };
+        const acct = args[args.indexOf('account') + 1];
+        if (args[0] === 'store') { vault.set(acct, (input || '').trim()); return { status: 0, stdout: '', stderr: '' }; }
+        if (args[0] === 'lookup') { const v = vault.get(acct); return v ? { status: 0, stdout: v, stderr: '' } : { status: 1, stdout: '', stderr: '' }; }
+        if (args[0] === 'clear') { vault.delete(acct); return { status: 0, stdout: '', stderr: '' }; }
+      }
+      if (platform === 'win32') {
+        if (args.includes('exit 0')) return { status: 0, stdout: '', stderr: '' };
+        const script = args[args.length - 1];
+        if (/Protect\(/.test(script) && !/Unprotect/.test(script)) return { status: 0, stdout: Buffer.from('enc:' + input.trim()).toString('base64') + '\n', stderr: '' };
+        if (/Unprotect/.test(script)) return { status: 0, stdout: Buffer.from(input.trim(), 'base64').toString().replace(/^enc:/, '') + '\n', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    };
+    return { run, calls };
+  };
+  for (const [platform, kind] of [['darwin', 'keychain'], ['win32', 'dpapi'], ['linux', 'libsecret']]) {
+    const f = fakeOs(platform);
+    const store = makeSecretStore({ platform, run: f.run, env: {} });
+    check(`${platform} store has kind ${kind} and is available`, store.kind === kind && store.available());
+    const { blob } = store.set('alice@relay.test#abc123', TOKEN);
+    check(`${platform} store round-trips a token`, store.get('alice@relay.test#abc123', blob) === TOKEN);
+    check(`${platform} never passes the secret in argv`, f.calls.length > 0 && f.calls.every(c => !c.args.some(a => String(a).includes(TOKEN) || String(a).includes(blob || '\u0000'))), JSON.stringify(f.calls.map(c => c.args)));
+    store.del('alice@relay.test#abc123');
+    if (platform !== 'win32') check(`${platform} delete removes it`, store.get('alice@relay.test#abc123') === null);
+  }
+  {
+    const f = fakeOs('darwin'); const store = makeSecretStore({ platform: 'darwin', run: f.run, env: {} });
+    let refused = 0;
+    for (const bad of ['short', 'has space in it padded 1234567890', 'x'.repeat(16) + '\nadd-generic-password -w pwned', 'a'.repeat(201)]) { try { store.set('acct', bad); } catch { refused++; } }
+    try { store.set('acct"; rm -rf', TOKEN); } catch { refused++; }
+    check('a malformed secret or account is refused before any command runs', refused === 5 && f.calls.length === 0);
+  }
+  {
+    const store = makeSecretStore({ platform: 'linux', run: () => ({ status: null, stdout: '', stderr: '' }), env: {} });
+    check('linux without secret-tool is not available (falls back to file)', store.available() === false);
+    const headless = makeSecretStore({ platform: 'linux', run: (c, a) => (a[0] === '--version' ? { status: 0, stdout: '', stderr: '' } : { status: 1, stdout: '', stderr: 'Cannot autolaunch D-Bus without X11 $DISPLAY' }), env: {} });
+    check('linux with no D-Bus session is not available', headless.available() === false);
+  }
+  check('SLOPSTREAM_KEYCHAIN=off uses the file', makeSecretStore({ platform: 'darwin', run: () => { throw new Error('must not run'); }, env: { SLOPSTREAM_KEYCHAIN: 'off' } }).kind === 'file');
+  check('two homes get different accounts', secretAccount({ user: 'a', relay: 'wss://r.test' }, '/h1') !== secretAccount({ user: 'a', relay: 'wss://r.test' }, '/h2'));
+  check('account names use user, relay host and a home hash', /^a@r\.test#[0-9a-f]{12}$/.test(secretAccount({ user: 'a', relay: 'wss://r.test' }, '/h1')));
+
+  // config.js with the fake keychain
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-cfg-'));
+  const f = fakeOs('darwin'); const store = makeSecretStore({ platform: 'darwin', run: f.run, env: {} });
+  const cfg = { relay: 'wss://r.test', user: 'alice', token: TOKEN, auth: 'github', deviceId: 'd1' };
+  check('saveConfig stores in the keychain', saveConfig(cfg, home, { store }) === 'keychain');
+  const onDisk = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+  check('config.json has tokenStore and no token', onDisk.tokenStore === 'keychain' && !('token' in onDisk) && !JSON.stringify(onDisk).includes(TOKEN));
+  check('loadConfig fills the token from the keychain', loadConfig(home, { store }).token === TOKEN);
+  const lost = new Map(); const emptyStore = makeSecretStore({ platform: 'darwin', run: fakeOs('darwin').run, env: {} });
+  const noTok = loadConfig(home, { store: emptyStore });
+  check('a missing keychain item gives token null and tokenError', noTok.token === null && !!noTok.tokenError && noTok.user === 'alice');
+  deleteSecret(onDisk, home, { store });
+  check('deleteSecret removes the keychain item', loadConfig(home, { store }).token === null);
+
+  // migration of an old plain-file config
+  const home2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-cfg-'));
+  fs.writeFileSync(path.join(home2, 'config.json'), JSON.stringify(cfg));
+  check('a plain token is NOT migrated unless asked (bridge path)', loadConfig(home2, { store }).token === TOKEN && !JSON.parse(fs.readFileSync(path.join(home2, 'config.json'), 'utf8')).tokenStore);
+  check('a human command migrates the plain token into the keychain', loadConfig(home2, { store, migrate: true }).token === TOKEN && JSON.parse(fs.readFileSync(path.join(home2, 'config.json'), 'utf8')).tokenStore === 'keychain' && !fs.readFileSync(path.join(home2, 'config.json'), 'utf8').includes(TOKEN));
+  // a store that cannot read back must not lose the token from the file
+  const broken = { kind: 'keychain', available: () => true, set: () => ({}), get: () => null, del() {} };
+  const home3 = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-cfg-'));
+  fs.writeFileSync(path.join(home3, 'config.json'), JSON.stringify(cfg));
+  loadConfig(home3, { store: broken, migrate: true });
+  check('migration keeps the file token when the read-back fails', JSON.parse(fs.readFileSync(path.join(home3, 'config.json'), 'utf8')).token === TOKEN);
+  for (const h of [home, home2, home3]) fs.rmSync(h, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -24,7 +24,9 @@ Run the tests before opening a PR:
 npm test
 ```
 
-This runs five suites against a local relay and bridge, with no network or AI needed: `test/core.js` (relay core unit tests), `test/e2e.js`, `test/group.js`, `test/codex.js` (end to end against the Node relay) and `test/login.js` (GitHub login and `link` / `join` against a fake GitHub). A line reading `error: auth: bad user or token` partway through is expected; a test checks that a wrong token is rejected.
+This runs six suites against a local relay and bridge, with no network or AI needed: `test/unit.js` (client helpers: errors, versions, migrations, keychain), `test/core.js` (relay core unit tests), `test/e2e.js`, `test/group.js`, `test/codex.js` (end to end against the Node relay) and `test/login.js` (GitHub login and `link` / `join` against a fake GitHub). A line reading `error: auth: bad user or token` partway through is expected; a test checks that a wrong token is rejected.
+
+Tests never touch your real keychain (`SLOPSTREAM_KEYCHAIN=off`). To check the keychain code against your OS's real store, run `SLOPSTREAM_TEST_REAL_KEYCHAIN=1 node test/keychain-smoke.js`; it stores, reads back and deletes a dummy secret.
 
 For a quick manual check without an AI agent or a second machine:
 

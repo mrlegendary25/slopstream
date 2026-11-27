@@ -1,7 +1,7 @@
 // `slopstream status`: is this machine ready? Checks Node, saved login, relay reachability,
 // your links and who is online right now, and which agents are installed.
 import { spawnSync } from 'node:child_process';
-import { loadConfig, configFile } from './config.js';
+import { loadConfig, configFile, defaultHome } from './config.js';
 import { admin, nextMsg } from './net.js';
 
 const ver = (cmd) => {
@@ -22,9 +22,10 @@ export async function runStatus() {
   const major = Number(process.versions.node.split('.')[0]);
   line(major >= 20, `Node v${process.versions.node} (needs 20 or newer)`); if (major < 20) bad = true;
 
-  const cfg = loadConfig();
+  const cfg = loadConfig(defaultHome(), { migrate: true });
   if (!cfg) { line(false, `no saved login. Run: slopstream login   (expected ${configFile()})`); return 1; }
   line(true, `saved login: user "${cfg.user}", relay ${cfg.relay}`);
+  if (!cfg.token) { line(false, `the saved token could not be read (${cfg.tokenError || 'missing'}). Run: slopstream login`); return 1; }
 
   let ws;
   try { ws = await admin(cfg); line(true, 'relay reachable and login accepted'); }

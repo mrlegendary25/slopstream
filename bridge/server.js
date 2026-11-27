@@ -306,7 +306,7 @@ async function deliverInbound(m) {
 
 let backoff = 1000;
 function connect() {
-  if (!cfg) { state.fatal = 'not set up. Run in a terminal: slopstream login'; err(state.fatal); return; }
+  if (!cfg || !cfg.token) { state.fatal = cfg?.tokenError ? `FATAL: the saved login could not be read (${cfg.tokenError}). Run in a terminal: slopstream login` : 'not set up. Run in a terminal: slopstream login'; err(state.fatal); return; }
   if (state.fatal && state.fatal.startsWith('FATAL')) return;
   const ws = new WebSocket(cfg.relay);
   state.ws = ws;

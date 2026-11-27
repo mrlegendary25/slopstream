@@ -1,4 +1,5 @@
 // Unit tests for RelayCore: no network, no files. Run: node test/core.js
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 import crypto from 'node:crypto';
 import { RelayCore, configFromEnv } from '../relay/core.js';
 import { MemKV } from '../relay/kv-mem.js';

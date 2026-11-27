@@ -1,4 +1,5 @@
 // End-to-end test: real relay + real CLI pairing + two real bridge processes over MCP stdio.
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

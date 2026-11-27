@@ -1,4 +1,5 @@
 // End-to-end: GitHub login (fake GitHub), `link` + `join`, later approval, devices, logout, join page, human-only guard.
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 // Set RELAY_URL (e.g. ws://127.0.0.1:18800) to run against an already-running relay instead of spawning the Node one.
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { startFakeGitHub } from './fake-github.js';
+import { loadConfig } from '../bridge/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'bridge/cli.js');
@@ -52,8 +54,9 @@ async function login(n, id, login) {
 // 1-2. logins
 const la = await login('alice', 1, 'Alice');
 check('alice logs in via GitHub device flow', la.code === 0 && /Logged in as alice/.test(la.out), la.out);
-const cfgA = JSON.parse(fs.readFileSync(path.join(home('alice'), 'config.json'), 'utf8'));
+const cfgA = loadConfig(home('alice'));
 check('config has auth:github and an sst_ token', cfgA.auth === 'github' && cfgA.token.startsWith('sst_'));
+check('config keeps working with tokenStore file', JSON.parse(fs.readFileSync(path.join(home('alice'), 'config.json'), 'utf8')).tokenStore === 'file');
 const lb = await login('bob', 2, 'Bob'); const lc = await login('carol', 3, 'Carol');
 check('bob and carol log in', /Logged in as bob/.test(lb.out) && /Logged in as carol/.test(lc.out));
 check('whoami shows alice', /alice/.test(run('alice', TMP, 'whoami').out));

@@ -65,7 +65,8 @@ export function runInit({ chat, agent = 'claude', cwd = process.cwd(), env = pro
   agent = String(agent).toLowerCase();
   if (!['claude', 'codex'].includes(agent)) throw new Error('--agent must be "claude" or "codex"');
   const hd = homeDir || env.SLOPSTREAM_HOME;
-  const home = hd ? { SLOPSTREAM_HOME: path.resolve(hd) } : {};
+  // An explicit home (the demo) is a throwaway identity: keep it out of the real keychain too.
+  const home = hd ? { SLOPSTREAM_HOME: path.resolve(hd), ...(homeDir ? { SLOPSTREAM_KEYCHAIN: 'off' } : {}) } : {};
   const written = [];
   const warnings = [];
   if (SERVER_PATH.includes(`${path.sep}_npx${path.sep}`)) {

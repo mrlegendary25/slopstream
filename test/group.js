@@ -1,4 +1,5 @@
 // Group (>2 person) tests: invite, targeted send_message ("to"), ambiguous-target refusal,
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 // receipts routed to the right sender only, MAX_GROUP_SIZE enforcement, and leaving a group.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';

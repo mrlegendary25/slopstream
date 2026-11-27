@@ -47,6 +47,7 @@ const launchLine = (agent, folder) => agent === 'claude'
   : `cd ${folder} && codex`;
 
 export async function demoUp({ dir, a = 'claude', b = 'claude', c, port = 18787, bin = 'slopstream' }) {
+  process.env.SLOPSTREAM_KEYCHAIN = 'off'; // throwaway identities must not litter the real keychain
   const group = [a, b, ...(c ? [c] : [])];
   for (const x of group) if (!AGENTS.includes(x)) throw new Error(`agent must be "claude" or "codex" (got "${x}")`);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be a number between 1024 and 65535');

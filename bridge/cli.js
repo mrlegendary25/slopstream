@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { execSync } from 'node:child_process';
-import { loadConfig, saveConfig, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
+import { loadConfig, saveConfig, deleteSecret, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
 import { maybeNotifyUpdate } from './update-check.js';
@@ -55,10 +55,11 @@ const peersOf = (members) => members.map(p => `${p.user}/${p.chat}`).join(', ');
 const who = (u) => `@${u.user}${u.github ? ` (github.com/${u.github})` : ''}`;
 
 async function ensureLoggedIn(relay) {
-  return loadConfig() || await runLogin({ relay });
+  return loadHuman() || await runLogin({ relay });
 }
 
-const needCfg = () => loadConfig() || die('Not set up. Run: slopstream login');
+const loadHuman = () => loadConfig(defaultHome(), { migrate: true }); // human commands only: moves an old plain-file token into the keychain
+const needCfg = () => loadHuman() || die('Not set up. Run: slopstream login');
 
 // The relay writes a pidfile on start (relay/server.js). That is the primary lookup and works on
 // every OS. `pgrep` stays as a Unix-only fallback so a relay started before pidfiles existed, or
@@ -160,7 +161,7 @@ async function main() {
         code = normCode(u.pathname.split('/j/')[1] || '');
       } else code = normCode(input);
       if (!code) die('That does not look like an invite code or link.');
-      let cfg = loadConfig();
+      let cfg = loadHuman();
       if (cfg && relayFromUrl && httpBase(cfg.relay) !== httpBase(relayFromUrl)) {
         die(`This invite is for ${relayFromUrl} but you're logged in to ${cfg.relay}. Run: slopstream logout, then try again.`);
       }
@@ -212,9 +213,10 @@ async function main() {
     }
     case 'logout': {
       const cfg = loadConfig();
-      if (cfg && cfg.auth === 'github' && cfg.deviceId) {
+      if (cfg && cfg.auth === 'github' && cfg.deviceId && cfg.token) {
         try { const ws = await admin(cfg); ws.send(JSON.stringify({ t: 'device_revoke', id: cfg.deviceId })); await nextMsg(ws, ['device_revoked'], 3000).catch(() => {}); ws.close(); } catch { /* relay unreachable: still log out locally */ }
       }
+      deleteSecret(cfg);
       fs.rmSync(configFile(), { force: true });
       console.log('Logged out.');
       break;
