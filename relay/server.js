@@ -32,7 +32,7 @@ const server = http.createServer((req, res) => {
     if (tooBig) { res.writeHead(413, { 'content-type': 'text/plain' }); return res.end('payload too large'); }
     try {
       const url = new URL(req.url, 'http://x');
-      const out = await core.handleHttp({ method: req.method, path: url.pathname, body: Buffer.concat(chunks).toString('utf8'), ip: req.socket.remoteAddress });
+      const out = await core.handleHttp({ method: req.method, path: url.pathname, query: url.search.slice(1), headers: req.headers, body: Buffer.concat(chunks).toString('utf8'), ip: req.socket.remoteAddress });
       res.writeHead(out.status, out.headers || {});
       res.end(out.body);
     } catch (e) {

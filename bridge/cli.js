@@ -12,7 +12,7 @@ import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
 import { maybeNotifyUpdate } from './update-check.js';
 import { RelayError, explain } from './errors.js';
-import { runLogin } from './login.js';
+import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runStatus } from './status.js';
 import { runSimulate } from './simulate.js';
@@ -56,6 +56,30 @@ const who = (u) => `@${u.user}${u.github ? ` (github.com/${u.github})` : ''}`;
 
 async function ensureLoggedIn(relay) {
   return loadHuman() || await runLogin({ relay });
+}
+
+// Does this relay want a click in the browser (signed in to GitHub) before a chat becomes reachable by someone new?
+// Then the browser page IS the approval, so the terminal y/N is skipped. An old relay has no such flag: the terminal flow stays.
+async function browserConfirms(cfg) {
+  if (cfg.auth !== 'github') return false;
+  try { return (await getJson(`${httpBase(cfg.relay)}/v1/info`)).confirmLinks === true; } catch { return false; }
+}
+
+// Like nextMsg, but if the relay parks the request until the person confirms in the browser, show the link and keep waiting.
+// `retryHint` says what to run when the confirmation expires before anyone clicked.
+async function waitConfirming(ws, cfg, types, mine, retryHint, firstTimeout = 0) {
+  let timeout = firstTimeout;
+  for (;;) {
+    const m = await nextMsg(ws, [...types, 'confirm_required', 'confirm_expired', 'confirm_declined'], timeout, mine);
+    if (m.t === 'confirm_required') {
+      console.log(`\nApprove in your browser: ${m.url}   (link expires in ${Math.max(1, Math.round(m.expiresInSec / 60))} minutes)`);
+      openBrowser(m.url, { allowOrigin: httpBase(cfg.relay) });
+      timeout = 0; continue;
+    }
+    if (m.t === 'confirm_expired') die(`The confirmation expired. Nothing was linked.\n  → ${retryHint}`);
+    if (m.t === 'confirm_declined') die('You declined in the browser. Nothing was linked.');
+    return m;
+  }
 }
 
 const loadHuman = () => loadConfig(defaultHome(), { migrate: true }); // human commands only: moves an old plain-file token into the keychain
@@ -142,11 +166,12 @@ async function main() {
       console.log(`\nSend this to your teammate:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
       const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
       process.on('SIGINT', stays); ws.on('close', stays);
+      const viaBrowser = await browserConfirms(cfg);
       const req = await nextMsg(ws, ['pair_request'], 0, mine);
       console.log(`\n${who(req.from)} wants to link their chat "${req.from.chat}" with your chat "${chat}".`);
-      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      const ok = viaBrowser || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, mine);
+      const r = await waitConfirming(ws, cfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${req.code}`);
       ws.off('close', stays); process.off('SIGINT', stays);
       if (r.t === 'paired') { console.log(`Linked! ${chat} <-> ${peersOf(r.members)}`); printStart(init); } else console.log('Denied.');
       ws.close(); break;
@@ -171,11 +196,12 @@ async function main() {
       if (inv.status !== 'open') die(explain('bad_code', 'That invite is unknown or has expired.'));
       const chat = rest[1] || defaultChat(process.cwd());
       console.log(`Link this folder (chat "${chat}") with @${inv.inviter}'s chat "${inv.chat}"?\nTheir agent will be able to send messages here; you approve each one.`);
-      if (!yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
+      const viaBrowser = await browserConfirms(cfg);
+      if (!viaBrowser && !yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
       const init = args.includes('--no-init') ? null : initFolder(chat);
       const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      await nextMsg(ws, ['pair_waiting'], 5000);
+      await waitConfirming(ws, cfg, ['pair_waiting'], (m) => normCode(m.code) === code, 'Run the same command again: slopstream join ' + input, 8000);
       console.log(`Waiting for @${inv.inviter} to approve... (you can close this; check later with: slopstream links)`);
       const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === code);
       if (r.t === 'paired') { console.log(`Linked! ${chat} <-> ${peersOf(r.members)}`); printStart(init); } else console.log('Denied by the other side.');
@@ -228,7 +254,9 @@ async function main() {
       const isInvite = cmd === 'invite';
       const chat = rest[0];
       if (!chat) die(isInvite ? 'usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)' : 'usage: slopstream pair-create <chat-label> [--yes]');
-      const ws = await admin(needCfg());
+      const pcfg = needCfg();
+      const ws = await admin(pcfg);
+      const viaBrowser = await browserConfirms(pcfg);
       ws.send(JSON.stringify({ t: isInvite ? 'invite_create' : 'pair_create', chat }));
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
@@ -241,9 +269,9 @@ async function main() {
       ws.on('close', stays);
       const req = await nextMsg(ws, ['pair_request'], 0, mine);
       console.log(`\n${req.from.user}${req.from.github ? ` (github.com/${req.from.github})` : ''} wants to ${isInvite ? `join "${chat}"` : `link their chat "${req.from.chat}" to your chat "${chat}"`}${isInvite ? ` (their chat label: "${req.from.chat}")` : ''}.`);
-      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      const ok = viaBrowser || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, mine);
+      const r = await waitConfirming(ws, pcfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${req.code}`);
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
       ws.off('close', stays); process.off('SIGINT', stays);
       ws.close(); break;
@@ -251,9 +279,10 @@ async function main() {
     case 'pair-accept': {
       requireHuman(cmd);
       const [code, chat] = rest; if (!code || !chat) die('usage: slopstream pair-accept <code> <chat-label>');
-      const ws = await admin(needCfg());
+      const acfg = needCfg();
+      const ws = await admin(acfg);
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      const w = await nextMsg(ws, ['pair_waiting']);
+      const w = await waitConfirming(ws, acfg, ['pair_waiting'], (m) => normCode(m.code) === normCode(code), `Run the same command again: slopstream pair-accept ${code} ${chat}`, 8000);
       console.log(`${w.message.charAt(0).toUpperCase()}${w.message.slice(1)}. You can close this; once approved the link appears in: slopstream links`);
       const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === normCode(code));
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied by the other side.');
@@ -275,7 +304,8 @@ async function main() {
     case 'deny': {
       if (cmd === 'approve') requireHuman(cmd);
       const code = rest[0]; if (!code) die(`usage: slopstream ${cmd} <code>${cmd === 'approve' ? ' [--yes]' : ''}`);
-      const ws = await admin(needCfg());
+      const apcfg = needCfg();
+      const ws = await admin(apcfg);
       ws.send(JSON.stringify({ t: 'list_requests' }));
       const { invites } = await nextMsg(ws, ['requests'], 5000);
       const v = invites.find(x => normCode(x.code) === normCode(code));
@@ -284,10 +314,10 @@ async function main() {
       if (cmd === 'approve') {
         const r = v.requester;
         console.log(`${r.user}${r.github ? ` (github.com/${r.github})` : ''} wants to link their chat "${r.chat}" with your chat "${v.chat}".`);
-        ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+        ok = (await browserConfirms(apcfg)) || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       }
       const mine = (m) => normCode(m.code) === normCode(v.code);
-      const done = nextMsg(ws, ['paired', 'pair_denied'], 5000, mine);
+      const done = waitConfirming(ws, apcfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${v.code}`, cmd === 'approve' ? 0 : 5000);
       ws.send(JSON.stringify({ t: 'pair_decision', code: v.code, ok }));
       const r = await done;
       console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');

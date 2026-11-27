@@ -52,7 +52,7 @@ export class RelayDO extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     const body = request.method === 'POST' ? (await request.text()).slice(0, 4096) : '';
-    const r = await this.core.handleHttp({ method: request.method, path: url.pathname, body, ip });
+    const r = await this.core.handleHttp({ method: request.method, path: url.pathname, query: url.search.slice(1), headers: Object.fromEntries(request.headers), body, ip });
     if (this.core.hasPendingState()) await this.ensureAlarm();
     return new Response(r.body, { status: r.status, headers: r.headers });
   }

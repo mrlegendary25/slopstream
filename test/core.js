@@ -264,6 +264,48 @@ function world(env = {}, kv2 = newKv()) {
   check('zombie session is replaced (old closed 4008)', s1.closed?.c === 4008 && last(s3, 'welcome')?.mode === 'session');
 }
 
+// ---- T5: browser confirmation (core level) ----
+{
+  const cfgOn = (env = {}) => configFromEnv({ PUBLIC_URL: 'https://r.test', GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec', CONFIRM_TTL_MS: '60000', ...env });
+  const kv5 = new MemKV({ users: { alice: sha('ta') } });
+  // two GitHub accounts, each with a device token
+  for (const [n, id, tok] of [['dana', 7, 'sst_dana'], ['eli', 8, 'sst_eli']]) {
+    kv5.put('account:' + n, { name: n, ghId: id, ghLogin: n }); kv5.put('gh:' + id, n);
+    kv5.put('device:' + sha(tok), { id: 'dev-' + n, user: n, label: 'x', createdAt: 0, lastSeenAt: clock });
+  }
+  const core5 = new RelayCore({ kv: kv5, config: cfgOn(), now: () => clock });
+  const adm = (u, t, v = 3) => { const c = new FakeConn(); core5.openConn(c, { ip: '2.2.2.2' }); core5.onMessage(c, JSON.stringify({ t: 'hello', v, user: u, token: t })); return c; };
+  const sy5 = (c, o) => core5.onMessage(c, JSON.stringify(o));
+  check('needsConfirm is false for legacy users, true for GitHub accounts', core5.needsConfirm('alice') === false && core5.needsConfirm('dana') === true);
+  check('needsConfirm is false when CONFIRM_LINKS=off', new RelayCore({ kv: kv5, config: cfgOn({ CONFIRM_LINKS: 'off' }), now: () => clock }).needsConfirm('dana') === false);
+  check('auto without a secret leaves confirmation off', new RelayCore({ kv: new MemKV(), config: configFromEnv({ GITHUB_CLIENT_ID: 'cid' }) }).confirmEnabled() === false);
+  let threw = '';
+  try { new RelayCore({ kv: new MemKV(), config: configFromEnv({ CONFIRM_LINKS: 'on', GITHUB_CLIENT_ID: 'cid' }) }); } catch (e) { threw = e.message; }
+  check('CONFIRM_LINKS=on without a secret throws', /GITHUB_CLIENT_SECRET/.test(threw), threw);
+
+  const d1 = adm('dana', 'sst_dana'); const e1 = adm('eli', 'sst_eli');
+  sy5(d1, { t: 'pair_create', chat: 'web' }); const code5 = last(d1, 'pair_code').code;
+  sy5(e1, { t: 'pair_accept', code: code5, chat: 'api' });
+  const cr = last(e1, 'confirm_required');
+  check('pair_accept on a GitHub account is parked', !!cr && !last(e1, 'pair_waiting') && cr.expiresInSec === 60 && cr.url.startsWith('https://r.test/c/'));
+  check('bad code still fails immediately (no confirm)', (() => { const x = adm('eli', 'sst_eli'); sy5(x, { t: 'pair_accept', code: 'zzzzz-zzzzz', chat: 'q' }); return last(x, 'error')?.code === 'bad_code' && !last(x, 'confirm_required'); })());
+  check('a parked confirm lists as pending state (keeps the DO alarm alive)', core5.hasPendingState());
+  clock += 61000; core5.sweep();
+  check('expired confirm is swept and confirm_expired is sent', last(e1, 'confirm_expired')?.id === cr.id && kv5.list('confirm:').length === 0);
+  check('...and the invite was never touched', kv5.get('invite:' + code5.replace('-', '')).requester === null);
+
+  const r1 = await core5.handleHttp({ method: 'GET', path: '/c/' + cr.id, query: '', headers: {}, body: '', ip: '' });
+  check('expired confirm page is 404', r1.status === 404);
+  const forged = core5.signSession({ u: 'eli', gh: 8, exp: clock + 1e6 });
+  check('a valid session cookie is accepted, a tampered one is not', core5.readSession('ss_web=' + forged)?.u === 'eli' && core5.readSession('ss_web=' + forged.slice(0, -2) + 'AA') === null);
+  check('an expired session cookie is rejected', core5.readSession('ss_web=' + core5.signSession({ u: 'eli', gh: 8, exp: clock - 1 })) === null);
+  for (let i = 0; i < 5; i++) { sy5(d1, { t: 'pair_create', chat: 'c' + i }); }
+  const codes5 = d1.sent.filter(m => m.t === 'pair_code').slice(-5).map(m => m.code);
+  const e2 = adm('eli', 'sst_eli');
+  for (let i = 0; i < 6; i++) sy5(e2, { t: 'pair_accept', code: codes5[i % 5], chat: 'x' + i });
+  check('at most 5 open confirms per user (too_many_confirms)', e2.sent.filter(m => m.t === 'confirm_required').length === 5 && last(e2, 'error')?.code === 'too_many_confirms', JSON.stringify(e2.sent.map(m => m.t + ':' + (m.code || ''))));
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

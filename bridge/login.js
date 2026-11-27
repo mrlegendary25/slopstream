@@ -8,9 +8,14 @@ import { httpBase, getJson, postJson } from './http.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function openBrowser(url) {
+// Opens only two kinds of URL: GitHub's device page, and (with allowOrigin = the relay's own origin) that relay's /c/<id> confirm page.
+// Anything else is ignored, so a hostile relay message can't make this open an arbitrary site.
+export function openBrowser(url, { allowOrigin } = {}) {
   if (process.env.SLOPSTREAM_NO_BROWSER) return;
-  if (!/^https:\/\/github\.com\/[A-Za-z0-9/_-]+$/.test(url)) return; // only ever open the real GitHub device page
+  const github = /^https:\/\/github\.com\/[A-Za-z0-9/_-]+$/.test(url);
+  let confirm = false;
+  try { const u = new URL(url); confirm = !!allowOrigin && u.origin === new URL(allowOrigin).origin && /^\/c\/[A-Za-z0-9_-]+$/.test(u.pathname) && !u.search && !u.hash; } catch { /* not a URL */ }
+  if (!github && !confirm) return;
   const [cmd, ...a] = process.platform === 'darwin' ? ['open', url]
     : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url]
     : ['xdg-open', url];

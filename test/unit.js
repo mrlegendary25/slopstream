@@ -18,7 +18,7 @@ const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('PAS
 // --- error catalog ---
 const core = fs.readFileSync(new URL('../relay/core.js', import.meta.url), 'utf8');
 const codes = new Set();
-for (const re of [/err\('([a-z_]+)'/g, /code: '([a-z_]+)'/g, /nack\('([a-z_]+)/g, /nack\(`([a-z_]+)/g]) {
+for (const re of [/\b(?:err|bad|fail)\('([a-z_]+)'/g, /code: '([a-z_]+)'/g, /nack\('([a-z_]+)/g, /nack\(`([a-z_]+)/g]) {
   for (const m of core.matchAll(re)) codes.add(m[1]);
 }
 // nack(cond ? 'a' : 'b'): take every quoted word inside the call
