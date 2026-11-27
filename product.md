@@ -61,7 +61,7 @@ These were decided up front, and every feature is held to them.
 3. **Live, not queued (for now).** A message is delivered only if the other side's linked session is open right now. Nothing is stored for later, so nobody's agent gets poked at 3 a.m. Asynchronous consultations are on the roadmap, opt-in per link.
 4. **Arrives in the current session, as a new prompt.** Never a new chat, never a side channel. The conversation stays where the context already is.
 5. **Treat the other agent as a stranger.** Everything inbound is marked *untrusted*, the agent is told to show it to its owner and wait, and nothing sensitive moves without explicit approval.
-6. **The agent can't change the rules.** Linking, unlinking and who's allowed are done by a person at a terminal. The agent only has "send a message" and "check status". A malicious message can't talk its way into wider access.
+6. **The agent can't change the rules.** Linking, unlinking and who's allowed are done by a person, at a terminal and with a click in their own browser. The agent only has "send a message" and "check status". A malicious message can't talk its way into wider access.
 7. **Any vendor.** Your team doesn't all use the same agent. Only the last hop (getting a message into a running session) is specific to each agent; the relay, trust model and message format are vendor-neutral.
 
 ## 5. How it works
@@ -103,7 +103,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 **Enforced in code by the relay (and tested):**
 - Only linked sessions can connect; strangers and unlinked sessions can't.
 - Live delivery only; no queueing, even if a bridge is modified.
-- Linking needs a one-time invite **and** an existing member's approval, typed by a person at a terminal.
+- Linking needs a one-time invite **and** an existing member's approval, typed by a person at a terminal. On the hosted relay, each person also confirms with a click in their browser, signed in to GitHub, so a program that has read their saved login still can't link their chat.
 - Token authentication with per-device tokens stored as hashes; text only; size cap; per-link rate limit; limits on failed logins and wrong invite codes; instant unlink.
 - The agent has no tool for linking, unlinking or allowlisting.
 
@@ -116,14 +116,15 @@ The main risk is **prompt injection**: text from another agent entering your age
 ## 8. Where it stands
 
 **Works today** (covered by automated end-to-end checks):
-- **Hosted relay with GitHub login and one-link linking**: `npm i -g slopstream`, `slopstream link`, send the link, `slopstream join`. Per-device revocable tokens. Invites last 24 hours and can be approved later. Tested with a real second person.
+- **Hosted relay with GitHub login and one-link linking**: `npm i -g slopstream`, `slopstream link`, send the link, `slopstream join`. Per-device revocable tokens, kept in the OS keychain. Invites last 24 hours, can be approved later, and can be made for one named person (`link @alice`). New links are confirmed with one click per person in their browser. Tested with a real second person.
+- **`slopstream doctor`**: checks every step from install to "is my teammate online" and prints the fix for each failure. Errors say what happened and what to do next. Senders see whether a message was delivered, shown, waiting or read, and Claude Code is told when a message is declined.
 - **Claude Code and Codex in any mix**: Claude ↔ Claude, Claude ↔ Codex, Codex ↔ Codex. For Codex, a message is pushed into the open chat with `codex queue` (verified against Codex 0.162.1), behind a hard approval pop-up, with an inbox fallback.
 - **macOS and Windows**, including a Mac and a Windows machine linked together. Still untested: Windows as a self-hosted relay, and the PowerShell approval pop-up. Codex on Windows doesn't work yet.
 - **Small groups, not just pairs**: up to `MAX_GROUP_SIZE` sessions per link (default 3), each addition approved by an existing member. `send_message` takes a `to` once more than one person is linked.
 - Live-only delivery, rate limit, size cap, metadata audit log, instant pause and unlink.
 - **Self-hosting**: the same relay on your own Cloudflare account or as a Node server.
 - A one-command **solo test mode** (`slopstream demo`), so one person can play two or three sides on one machine.
-- **Installable as a Claude Code plugin** (`/plugin install slopstream`) with the safe commands as slash commands. Linking still happens in a terminal on purpose.
+- **Installable as a Claude Code plugin** (`/plugin install slopstream`) with the safe commands as slash commands. Linking still happens in a terminal (and your browser) on purpose.
 
 ## 9. Roadmap
 

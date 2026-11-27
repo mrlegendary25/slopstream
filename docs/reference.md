@@ -2,16 +2,16 @@
 
 ## Commands
 
-Commands marked 🔒 need a real terminal: an agent can't run them.
+Commands marked 🔒 need a real terminal: an agent can't run them. Commands marked 🌐 open a page in your browser, where you confirm with a click while signed in to GitHub.
 
 ### Linking
 
 | Command | What it does |
 |---|---|
-| `slopstream link [chat] [--agent claude\|codex] [--add]` 🔒 | Log in if needed, set up this folder, make an invite link, wait and ask you to approve. `--add` adds another person to this folder's existing link |
-| `slopstream join <code-or-link> [chat] [--agent claude\|codex]` 🔒 | Accept an invite for this folder; the inviter approves |
-| `slopstream requests` | Your open invites, and who's waiting for approval |
-| `slopstream approve <code>` 🔒 / `deny <code>` | Let someone in, or refuse them |
+| `slopstream link [@user] [chat] [--agent claude\|codex] [--add]` 🔒 🌐 | Log in if needed, set up this folder, make an invite link, wait and ask you to approve. `@user` makes an invite only that person can use. `--add` adds another person to this folder's existing link |
+| `slopstream join <code-or-link> [chat] [--agent claude\|codex]` 🔒 🌐 | Accept an invite for this folder; you confirm in the browser, then the inviter approves |
+| `slopstream requests` | Invites made for you ("Invites for you"), your own open invites, and who's waiting for approval |
+| `slopstream approve <code>` 🔒 🌐 / `deny <code>` | Let someone in (confirmed in the browser), or refuse them |
 | `slopstream cancel <code>` | Withdraw an invite nobody used yet |
 | `slopstream links` | Your links, and who else is in each |
 | `slopstream unlink <chat>` | Leave a link; it dissolves once fewer than 2 people remain |
@@ -35,6 +35,7 @@ Commands marked 🔒 need a real terminal: an agent can't run them.
 |---|---|
 | `slopstream init <chat> [--agent claude\|codex]` | In a project folder: set it up for Claude Code (`.mcp.json`, `CLAUDE.md`) or Codex (`.codex/config.toml`, `AGENTS.md`). `link` and `join` do this for you |
 | `slopstream status` | Is this machine ready? Login, relay reachable, links and who's online, installed agents |
+| `slopstream doctor [--chat <label>] [--json]` | Run in a project folder. Checks every step (login, relay, this folder's setup, the link, whether your teammate is online) and prints the exact fix for each problem. `--json` for scripts. Exits 1 if anything is wrong |
 
 ### Testing
 
@@ -49,13 +50,14 @@ Commands marked 🔒 need a real terminal: an agent can't run them.
 
 | Command | What it does |
 |---|---|
-| `slopstream pair-create <chat> [--yes]` 🔒 | Code-only version of `link` |
-| `slopstream pair-accept <code> <chat>` 🔒 | Code-only version of `join` |
-| `slopstream invite <chat> [--yes]` 🔒 | Code-only version of `link --add` |
+| `slopstream pair-create <chat> [--yes]` 🔒 🌐 | Code-only version of `link` |
+| `slopstream pair-accept <code> <chat>` 🔒 🌐 | Code-only version of `join` |
+| `slopstream invite <chat> [--yes]` 🔒 🌐 | Code-only version of `link --add` |
 | `slopstream force-clean [--yes] [--relay-data <dir>] [--home <dir>]` | **Danger:** wipe this machine's login, pauses and logs, **and** a local relay's data |
 | `slopstream force-stop-clean [...]` | Same, but first stops a running local relay |
 | `node relay/server.js` | Run a Node relay ([Self-hosting](./self-hosting.md)) |
 | `node relay/admin.js add-user <name>` / `list-users` / `remove-user <name>` | Manage token users on a Node relay |
+| `node relay/admin.js stats` | Daily counters and weekly active links from a Node relay's data folder (counts only) |
 
 ## Plugin commands
 
@@ -79,6 +81,10 @@ Bridge and CLI (environment variables):
 | `SLOPSTREAM_GATE_CMD` | none | Your own approver command (JSON on stdin, exit 0 = approve). For Linux, or tests |
 | `SLOPSTREAM_PWSH` | `powershell.exe` | Windows: which PowerShell shows the pop-up, e.g. `pwsh.exe` |
 | `SLOPSTREAM_CODEX_BIN` | `codex` | Which `codex` program to use for the push |
+| `SLOPSTREAM_CLAUDE_BIN` | `claude` | Which `claude` program `status` and `doctor` look for, if it isn't on your PATH |
+| `SLOPSTREAM_KEYCHAIN` | on | `off` keeps your login token in a plain file instead of the system keychain |
+| `SLOPSTREAM_NO_UPDATE_CHECK` | unset | Set to anything to turn off the once-a-day "newer version" check |
+| `SLOPSTREAM_NO_BROWSER` | unset | Print links instead of opening your browser |
 
 Relay settings are in [Self-hosting](./self-hosting.md#relay-settings).
 
@@ -88,7 +94,8 @@ On your machine:
 
 | Path | What | Sensitive? |
 |---|---|---|
-| `~/.slopstream/config.json` | Relay address, your username, your device token | **Yes** (owner-only on macOS and Linux) |
+| `~/.slopstream/config.json` | Relay address, your username, and where your device token is kept. The token itself is in the system keychain (macOS Keychain, Windows protected storage, Linux keyring) when there is one, else in this file | **Only if there is no keychain** (owner-only on macOS and Linux) |
+| `~/.slopstream/update-check.json` | When slopstream last looked for a newer version | No |
 | `~/.slopstream/log.jsonl` | Every message you sent or received, with text | **Yes**, it's your conversation |
 | `<project>/.mcp.json` | How Claude Code starts the bridge | No |
 | `<project>/CLAUDE.md` | The safety-rules block, between `slopstream:start` and `slopstream:end` markers | No |

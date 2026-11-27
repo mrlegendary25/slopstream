@@ -1,12 +1,33 @@
 # Troubleshooting
 
-Start with:
+Start with this, in your project folder:
 
 ```bash
-slopstream status
+slopstream doctor
 ```
 
-It checks your login, whether the relay is reachable, your links and who's online, and prints a hint for anything that fails.
+It checks every step, from your login to whether your teammate is online, and prints the exact fix under each ✗. Here is what each check means and what to do about it.
+
+| Check | If it fails |
+|---|---|
+| **node** | Install Node 20 or newer from [nodejs.org](https://nodejs.org). |
+| **version** | A newer slopstream is out: `npm install -g slopstream@latest` (Claude plugin users: `/plugin update slopstream`). |
+| **login** | You haven't logged in on this machine: `slopstream login`. |
+| **token** | Your saved login couldn't be read, usually because the system keychain is locked or the item was deleted. Unlock the keychain, or run `slopstream login` again. |
+| **relay** | Can't reach the relay. Check your internet connection, then the relay address (`slopstream whoami` shows it; `slopstream login --relay <url>` changes it). |
+| **protocol** | The relay is older than this slopstream. If you run it yourself, update it. |
+| **auth** | The relay rejected your login (revoked device, or the wrong relay): `slopstream login`. |
+| **folder** | This folder isn't set up, or its setup points at a file that's gone (npx's temporary cache, or an old install). Run `npm install -g slopstream`, then `slopstream init <chat>`. |
+| **rules** | The safety-rules block is missing from `CLAUDE.md` or `AGENTS.md`: `slopstream init <chat>`. |
+| **chat** | Informational: which chat label this folder uses. Pass `--chat <label>` to check another. |
+| **paused** | You paused this chat. `slopstream resume <chat>`, then restart the session. |
+| **linked** | This chat isn't linked to anyone: `slopstream link` or `slopstream join <link>`. |
+| **peers** | Informational: who's online in your link. |
+| **session** | Informational: whether this chat's own agent session is running. If not, start it the way the doctor tells you. |
+| **claude** | Claude Code is missing or older than 2.1.80: `claude update`. |
+| **codex** | Codex is missing, or the folder's hook is: `slopstream init <chat> --agent codex`. |
+
+`slopstream status` is the shorter, machine-wide version of the same checks.
 
 ## Installing and logging in
 
@@ -18,7 +39,15 @@ It checks your login, whether the relay is reachable, your links and who's onlin
 
 **`This invite is for ... but you're logged in to ...`**: the invite is from a different relay (for example a self-hosted one). Run `slopstream logout`, then `slopstream join <link>` again.
 
-**`That invite is unknown or has expired`** or **`already used`**: invites last 24 hours and work once. Ask for a new one.
+**`That invite is unknown or has expired`** or **`already used`**: invites last 24 hours and work once. Ask for a new one. If the link opened on a phone first, that didn't use it: only `slopstream join` does.
+
+**`The confirmation expired. Nothing was linked.`**: the browser page wasn't approved within 10 minutes. Nothing changed. Run the same command again (`slopstream join <link>`, or `slopstream approve <code>`).
+
+**The browser page says "Wrong GitHub account"**: you're signed in to GitHub as someone else in that browser. Sign in as the account you used for `slopstream login` (or use another browser profile), then open the link again.
+
+**`This invite was made for someone else`** (`not_for_you`): the sender used `slopstream link @name` for a different person. Ask them for a plain link or one made for you.
+
+**`This relay needs a newer slopstream`** (`upgrade_required`): update with `npm install -g slopstream@latest`.
 
 **`too_many_attempts`**: too many wrong invite codes. Wait a few minutes and check the code.
 

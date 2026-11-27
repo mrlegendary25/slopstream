@@ -38,6 +38,7 @@
     ".claude-plugin/",
     "README.md",
     "product.md",
+    "CHANGELOG.md",
     "SECURITY.md",
     "THREAT_MODEL.md",
     "PRIVACY.md",

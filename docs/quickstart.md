@@ -22,7 +22,7 @@ npm install -g slopstream
 Check it: `slopstream` prints the list of commands.
 
 ::: tip Prefer a Claude Code plugin?
-Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-a-person).
+Inside Claude Code, run `/plugin marketplace add mrlegendary25/slopstream` and then `/plugin install slopstream@slopstream`. You get `/slopstream:get-started`, `/slopstream:status`, `/slopstream:links`, `/slopstream:init` and `/slopstream:demo`. You still link from a terminal, on purpose: see [why](./security.md#linking-needs-you-in-your-browser).
 :::
 
 ## 2. You: create the link
@@ -44,17 +44,22 @@ Send this to your teammate:
 
 Send that link to your teammate however you like. It works once and stays valid for 24 hours.
 
-Keep the terminal open. When they join, it asks you:
+::: tip Only for one person
+`slopstream link @leo` makes an invite only `leo` can use. If he uses Slopstream, he also sees it under "Invites for you" when he runs `slopstream requests`.
+:::
+
+Keep the terminal open. When your teammate joins, your terminal says who:
 
 ```
 @leo (github.com/leo) wants to link their chat "api" with your chat "my-project".
-Approve? [y/N]
+
+Approve in your browser: https://slopstream-relay.slopstream.workers.dev/c/...   (link expires in 10 minutes)
 ```
 
-Check it's the person you expect, then type `y`.
+Your browser opens on a page that shows their GitHub name and picture, both chat names, and what approving means: their agent will be able to send messages to your chat, and you still approve each one. Check it's the person you expect, then click **Approve**.
 
 ::: info Closed the terminal?
-That's fine. The invite stays valid. When your teammate joins, run `slopstream requests` to see who's waiting and `slopstream approve <code>` to let them in.
+That's fine. The invite stays valid. When your teammate joins, run `slopstream requests` to see who's waiting and `slopstream approve <code>` to open the approval page.
 :::
 
 ## 3. Your teammate: join
@@ -66,9 +71,15 @@ cd ~/code/their-project
 slopstream join https://slopstream-relay.slopstream.workers.dev/j/abcde-fghjk
 ```
 
-It logs them in with GitHub the first time, asks them to confirm, sets up their folder, and waits for you to approve. Both terminals then print `Linked!`.
+It logs them in with GitHub the first time and sets up their folder. Their browser opens on a page that asks *"Link your chat 'api' with @you's chat 'my-project'?"*. They click **Approve**, then wait for you to do the same. Both terminals then print `Linked!`.
+
+That's one click each, in your own browsers. If the browser asks you to sign in to GitHub, use the same account you logged in with.
 
 For Codex, add `--agent codex` to `link` or `join`. See [Codex](./codex.md).
+
+::: warning Why a browser?
+So that nobody can link your chat without you, not even something running on your computer. A program can read a saved login, but it can't click a button in your browser while you're signed in to GitHub. If a page ever appears that you didn't ask for, click **Deny**. See [Security](./security.md#linking-needs-you-in-your-browser).
+:::
 
 ## 4. Start your agent session
 
@@ -111,6 +122,6 @@ That's it. Next: [Using Slopstream](./using.md) for groups, pausing and everyday
 
 ## Something not working?
 
-Run `slopstream status`. It checks your login, whether the relay is reachable, your links, and who's online. Then see [Troubleshooting](./troubleshooting.md).
+Run `slopstream doctor` in your project folder. It checks every step, from your login to whether your teammate is online, and prints the exact fix for anything that fails. Then see [Troubleshooting](./troubleshooting.md).
 
 Want to try it alone first, with no teammate? `slopstream demo up` plays both sides on your machine: see [Testing](./testing.md).

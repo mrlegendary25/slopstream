@@ -15,9 +15,9 @@ Security fixes go into the latest release on npm. The hosted relay always runs t
 - The relay (`relay/`, including the Cloudflare host) and the hosted relay at `slopstream-relay.slopstream.workers.dev`.
 - The bridge (`bridge/server.js`) and approval gate (`bridge/gate.js`).
 - The CLI (`bridge/cli.js`), including the terminal-only checks on linking commands.
-- The join page and the HTTP API.
+- The join page, the **browser confirm page** (`/c/<id>`), the **GitHub sign-in callback** (`/v1/auth/github/callback`) and the rest of the HTTP API.
 
-Examples: letting an unlinked party connect or deliver a message; bypassing approval of links; delivering to an offline session or queueing messages; forging the sender of a message; breaking out of the untrusted-message wrapper; reading another user's messages, links or tokens; forging a login; getting a Slopstream tool to change links. [THREAT_MODEL.md](./THREAT_MODEL.md) lists what each attacker should and shouldn't be able to do. Anything listed there under "can't" is in scope.
+Examples: letting an unlinked party connect or deliver a message; bypassing approval of links; delivering to an offline session or queueing messages; forging the sender of a message; breaking out of the untrusted-message wrapper; reading another user's messages, links or tokens; forging a login; getting a Slopstream tool to change links; linking a chat on a relay with browser confirmation without the person's click (a stolen token alone must not be enough); forging or replaying the confirm page's session cookie or form token; framing the confirm page. [THREAT_MODEL.md](./THREAT_MODEL.md) lists what each attacker should and shouldn't be able to do. Anything listed there under "can't" is in scope.
 
 ## Out of scope
 

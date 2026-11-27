@@ -1,6 +1,6 @@
 # Slopstream threat model
 
-*Version 1, for slopstream 0.2.x. Update it whenever a trust boundary, a stored secret or a delivery rule changes. Reviewed in every PR that touches `relay/`, `bridge/server.js`, `bridge/gate.js` or the CLI's linking commands.*
+*Version 2, for slopstream 0.3.x. Update it whenever a trust boundary, a stored secret or a delivery rule changes. Reviewed in every PR that touches `relay/`, `bridge/server.js`, `bridge/gate.js` or the CLI's linking commands.*
 
 Slopstream lets text written by **another person's agent** enter **your agent's** session, and your agent usually has a shell, your files and your conversation. So the question for every design choice is: *what's the worst a message, a peer, a relay or a stolen token can make happen on your machine?*
 
@@ -11,7 +11,7 @@ This document lists what we protect, who might attack it, what each attacker can
 | Asset | Where it lives | Why it matters |
 |---|---|---|
 | Your machine and files | Your agent session (shell, edit and read tools) | The real prize. A tricked agent can do anything you can |
-| Your device token (`sst_…`) | `~/.slopstream/config.json` (hash on the relay) | Lets someone act as you on the relay |
+| Your device token (`sst_…`) | The OS keychain, or `~/.slopstream/config.json` when there is none (hash on the relay) | Lets someone act as you on the relay |
 | Message text | In transit through the relay; in `~/.slopstream/log.jsonl` on each side | Often about private code or plans |
 | Who is linked to whom, and when they talk | Relay storage and audit log | Reveals who works with whom |
 | Your GitHub identity | GitHub; the relay keeps your numeric id and login | Others recognise you by it when approving links |
@@ -29,6 +29,7 @@ This document lists what we protect, who might attack it, what each attacker can
 2. **Bridge / CLI ↔ relay.** Authenticated with your device token over TLS (hosted relay). The relay decides who can connect, who is linked and what is delivered.
 3. **Relay ↔ another person's bridge.** The other side is **untrusted**: assume it may run modified code.
 4. **You ↔ the CLI.** Linking commands require a real terminal (TTY), as a check that a person, not an agent, is running them.
+5. **You ↔ the relay's confirm page, in your browser.** On a relay with confirmation on, a new link also needs a click on `/c/<id>` while signed in to GitHub as you. This is the check a program with your token can't fake.
 
 ## Attackers
 
@@ -81,16 +82,21 @@ The most likely attacker, because a link is all it takes to put text into your s
 For example from a leaked backup, a synced dotfiles repo, or malware that reads `~/.slopstream/config.json`.
 
 **Can:**
-- Act as you on the relay from anywhere: connect as your linked sessions when you're offline, send messages as you, create invites, and approve requests. **The TTY check is in the CLI, so it doesn't stop someone using the protocol directly with a stolen token.**
+- Act as you on the relay from anywhere: connect as your linked sessions when you're offline, send messages as you, and create invites. The TTY check is in the CLI, so it doesn't stop someone using the protocol directly with a stolen token.
+
+**Can't (on a relay with browser confirmation, which includes the hosted relay):**
+- Create a new link, or approve one. Joining and approving are parked until the real person confirms in their own browser, signed in to GitHub as themselves. A token can't produce that session or that click, and an unconfirmed request expires after 10 minutes.
 
 **Can't:**
 - Use it after you revoke it (`slopstream devices revoke <id>`, or `slopstream logout` on that machine). Revocation is immediate.
 - Get your GitHub account, or other devices' tokens. The relay stores only SHA-256 hashes of tokens.
 - Take over a session that's currently online. A second connection for the same chat is refused as `duplicate` until the first has been silent for 75 seconds.
 
-**Mitigations:** per-device tokens; hashes only on the relay; owner-only file permissions on macOS and Linux (not Windows); `slopstream devices` shows when each device was last seen.
+**Mitigations:** browser confirmation for new links; per-device tokens; hashes only on the relay; the token in the OS keychain (macOS Keychain, Windows protected storage, Linux keyring), or an owner-only file when there is none; `slopstream devices` shows when each device was last seen.
 
-**Planned:** short-lived tokens with refresh, stored in the OS keychain (P1.4).
+**Residual risk:** a stolen token can still read and send in links that already exist, until you revoke it. Legacy self-hosted users (tokens created with `admin.js add-user`, no GitHub) have no browser confirmation, so for them a stolen token can still create and approve links.
+
+**Planned:** short-lived tokens, and per-device keys that never leave the device (P2.1, P2.3).
 
 ### 4. Your own agent, after being tricked
 
@@ -98,16 +104,19 @@ A confused deputy: your agent, with your permissions, doing what an inbound mess
 
 **Can (if you approve it, or if you've disabled prompts):**
 - Put file contents, secrets or anything it can read into a `send_message` call.
-- Use its own shell to read `~/.slopstream/config.json` and use the token directly, including speaking the protocol to approve or create links, bypassing the CLI's TTY check. Slopstream can't stop an agent that has an unrestricted shell; your agent app's permission prompts can.
+- Use its own shell to read your token (from `~/.slopstream/config.json`, or by asking the keychain: anything running as you can) and speak the protocol directly, bypassing the CLI's TTY check. It can then connect, send and create invites. Slopstream can't stop an agent that has an unrestricted shell; your agent app's permission prompts can.
 
 **Can't:**
 - Use any Slopstream tool to link, invite, approve, unlink, pause or read the token. Its only tools are `send_message`, `link_status` (and `check_inbox` on Codex).
 - Run `slopstream link`, `join`, `approve`, `invite`, `pair-create` or `pair-accept`: they refuse to run without a terminal.
+- Make your chat reachable by anyone new, on a relay with browser confirmation. Joining and approving need your click in your browser, signed in to GitHub as you. If the agent opens the confirm page itself, you see a page you didn't ask for, which says to click **Deny**.
 - Send while the peer is offline, send files, or exceed the size and rate limits.
 
 **Mitigations:** the outgoing permission prompt (never "always allow" `send_message`); Codex's hard gate; the rules in `CLAUDE.md` / `AGENTS.md` ("never send secrets or file contents unless your user approved that exact content").
 
-**Planned:** outbound secret scanning on every message (P2.4); keychain storage, so a plain file read doesn't expose the token (P1.4); an out-of-band confirmation for new links that an agent's shell can't produce.
+**Residual risk:** a person who clicks **Approve** on a confirm page they didn't ask for, and legacy self-hosted users with no browser confirmation. The keychain is not a wall against your own agent.
+
+**Planned:** outbound secret scanning on every message (P2.4); per-device keys, so a token isn't a bearer secret at all (P2.1, P2.3).
 
 ### 5. A malicious or compromised relay operator
 
@@ -164,3 +173,5 @@ These must stay true. A change that weakens one needs an explicit decision in th
 5. Every inbound message reaches the agent wrapped, sanitised and labelled as untrusted, with the sender stamped by the relay.
 6. Tokens are stored by the relay only as hashes.
 7. The hosted relay doesn't store message text.
+8. On a relay with confirmation on, no new person can reach your chat without a click in your browser, signed in as you on GitHub.
+9. The relay's counters hold counts only: never a name, a chat label, or message content.
