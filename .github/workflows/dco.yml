@@ -1,0 +1,44 @@
+name: DCO
+
+# Every commit in a pull request must carry a "Signed-off-by:" line (Developer Certificate of Origin).
+# See CONTRIBUTING.md#sign-off-your-commits-dco.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  signoff:
+    name: DCO
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check every commit is signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=0
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            author_email=$(git log -1 --format='%ae' "$sha")
+            case "$author_email" in
+              *'[bot]@users.noreply.github.com') echo "bot     $(git log -1 --format='%h %s' "$sha")"; continue ;;
+            esac
+            if git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha" | grep -qiF "<$author_email>"; then
+              echo "ok      $(git log -1 --format='%h %s' "$sha")"
+            else
+              echo "MISSING $(git log -1 --format='%h %s' "$sha")  (needs: Signed-off-by: <name> <$author_email>)"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo
+            echo "Some commits are not signed off. Fix with: git rebase --signoff $BASE && git push --force-with-lease"
+            exit 1
+          fi

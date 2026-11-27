@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mrlegendary25/slopstream/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue. See SECURITY.md.
+  - name: Documentation
+    url: https://mrlegendary25.github.io/slopstream/
+    about: Quick start, troubleshooting and reference.
