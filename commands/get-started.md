@@ -10,7 +10,7 @@ Help the user get started with Slopstream. Do this:
 3. Based on that, tell the user the next concrete step(s) they need. The default is the hosted relay, no servers needed:
    - Install the CLI once: `npm install -g slopstream` (needs Node 20+).
    - Log in with GitHub: `slopstream login` (`slopstream link` and `slopstream join` do this automatically the first time).
-   - One person types `slopstream link` in their project folder in a terminal. It prints a link like `https://<relay>/j/k7x2m-9qp4r`. They send it to the friend.
+   - One person types `slopstream link` in their project folder in a terminal. It prints a link like `https://<relay>/j/abcde-fghjk`. They send it to the friend.
    - The friend opens the link, then types `slopstream join <code>` in their own project folder. The first person approves when asked (or later with `slopstream requests` / `slopstream approve <code>`).
    - **All of these must be typed by the human in a terminal, never run through this chat.** `link`, `join` and `approve` refuse to run without a terminal on purpose, so an agent (or a message that tricks it) cannot link chats.
    - Both `link` and `join` already wire up the project folder. `/slopstream:init <chat-label>` (safe to run here) redoes that wiring. Then start the session with the flag it prints.

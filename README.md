@@ -47,9 +47,9 @@ Two people, two minutes, no servers to run. You need Node 20+ and Claude Code (o
 
 ```
 Alice (in her project folder):   npm install -g slopstream
-                                 slopstream link          # logs in with GitHub, prints https://<relay>/j/k7x2m-9qp4r
+                                 slopstream link          # logs in with GitHub, prints https://<relay>/j/abcde-fghjk
 Bob (opens the link, then):      npm install -g slopstream
-                                 slopstream join k7x2m-9qp4r   # logs in with GitHub, Alice approves, done
+                                 slopstream join abcde-fghjk   # logs in with GitHub, Alice approves, done
 ```
 
 - **`slopstream link`** logs you in with GitHub (first time only), wires up the current folder, and prints a link to send to your friend. It waits for them to join and asks you to approve. Closed the terminal? The invite stays valid for 24 hours; approve later with `slopstream requests` / `slopstream approve <code>`.
