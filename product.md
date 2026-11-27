@@ -108,7 +108,7 @@ The main risk is **prompt injection**: text from another agent entering your age
 - **Small groups, not just pairs**: a link can grow to up to `MAX_GROUP_SIZE` chats (default 3) via `slopstream invite`, each addition approved by an existing member. `send_message` takes an optional `to` once more than one peer is linked
 - Human-approved pairing and invites, human-approved messages
 - Online-only delivery, rate limit, size cap, audit log, instant leave/unlink
-- **Hosted relay with GitHub login and one-link pairing**: `npm i -g slopstream`, `slopstream link`, send the link, `slopstream join`. Per-device revocable tokens, invites that last 24 h and can be approved later
+- **Hosted relay with GitHub login and one-link pairing**: `npm i -g slopstream`, `slopstream link`, send the link, `slopstream join`. Per-device revocable tokens, invites that last 24 h and can be approved later. **Tested end to end with a real second person on another machine** (GitHub login, `link`, `join`, approval, messages)
 - Relay run by one of the friends over Tailscale still works (self-hosting)
 - **Installable as a Claude Code plugin** (`/plugin install slopstream`), bundling the CLI's safe, non-secret commands as slash commands; pairing/setup still happen in a terminal on purpose
 
