@@ -6,8 +6,8 @@
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayDO" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayDO"] }],
   "vars": {
-    "PUBLIC_URL": "https://slopstream-relay.<SUBDOMAIN>.workers.dev",
-    "GITHUB_CLIENT_ID": "<SET IN T7>",
+    "PUBLIC_URL": "https://slopstream-relay.lalchandanihimnish.workers.dev",
+    "GITHUB_CLIENT_ID": "Ov23liJl7xE9rtfzLD0T",
     "AUDIT_TEXT": "0",
     "MAX_GROUP_SIZE": "3"
   }
