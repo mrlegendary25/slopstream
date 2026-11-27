@@ -350,6 +350,27 @@ function world(env = {}, kv2 = newKv()) {
   clock -= 3 * 86400000;
 }
 
+// ---- T7: receipt statuses ----
+{
+  const kv7 = new MemKV({ users: { alice: sha('ta'), bob: sha('tb') } });
+  const core7 = new RelayCore({ kv: kv7, config: configFromEnv({}), now: () => clock });
+  kv7.put('links', [{ id: 'L1', members: [{ user: 'alice', chat: 'web' }, { user: 'bob', chat: 'api' }], createdAt: 'x' }]);
+  core7.links = kv7.get('links');
+  const sess7 = (u, t, chat, v) => { const c = new FakeConn(); core7.openConn(c, { ip: '7.7.7.7' }); core7.onMessage(c, JSON.stringify({ t: 'hello', v, user: u, token: t, chat })); return c; };
+  const bobS = sess7('bob', 'tb', 'api', 3);
+  const aliceOld = sess7('alice', 'ta', 'web', 2);
+  for (const status of ['accepted', 'shown', 'inbox', 'read']) core7.onMessage(bobS, JSON.stringify({ t: 'receipt', id: 'm1', status, to: 'alice' }));
+  core7.onMessage(bobS, JSON.stringify({ t: 'receipt', id: 'm1', status: 'bogus', to: 'alice' }));
+  const got = aliceOld.sent.filter(m => m.t === 'receipt').map(m => m.status);
+  check('v2 sender never receives shown/inbox/read (only accepted)', got.join() === 'accepted', got.join());
+  core7.onMessage(bobS, JSON.stringify({ t: 'receipt', id: 'm2', status: 'declined', to: 'alice' }));
+  check('v2 sender still gets declined', aliceOld.sent.filter(m => m.t === 'receipt').map(m => m.status).join() === 'accepted,declined');
+  aliceOld.close(4000); core7.onClose(aliceOld);
+  const aliceNew = sess7('alice', 'ta', 'web', 3);
+  for (const status of ['accepted', 'inbox', 'shown', 'read']) core7.onMessage(bobS, JSON.stringify({ t: 'receipt', id: 'm3', status, to: 'alice' }));
+  check('v3 sender receives every status in order', aliceNew.sent.filter(m => m.t === 'receipt').map(m => m.status).join() === 'accepted,inbox,shown,read');
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

@@ -83,8 +83,8 @@ const back = await waitFor(() => H.inbox[0]);
 check('reply reaches himnish on the same thread', back?.meta?.thread_id === thread && back?.meta?.from === 'maya');
 
 // 5. receipts route back to the correct original sender only
-await waitFor(async () => (await H.status()).recentReceipts.some(x => x.status === 'accepted' && x.from === 'maya'));
-check('himnish got an accept receipt from maya', (await H.status()).recentReceipts.some(x => x.from === 'maya'));
+await waitFor(async () => (await H.status()).recentReceipts.some(x => x.status === 'accepted' && x.to === 'maya'));
+check('himnish got an accept receipt from maya', (await H.status()).recentReceipts.some(x => x.to === 'maya'));
 check('aarush got no receipt for a message it was never part of', (await A.status()).recentReceipts.length === 0, JSON.stringify((await A.status()).recentReceipts));
 
 // 6. group is full (MAX_GROUP_SIZE=3): a 4th person cannot be invited

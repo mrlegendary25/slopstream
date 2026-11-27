@@ -16,6 +16,7 @@ export const PROTOCOL = 3;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
 const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
+const RECEIPT_STATUSES = ['accepted', 'declined', 'shown', 'inbox', 'read'];
 const CONFIRM_MAX_OPEN = 5;
 const MAX_DIRECTED_PER_DAY = 20;
 const SESSION_MS = 15 * 60 * 1000;
@@ -768,16 +769,18 @@ export class RelayCore {
   handleSession(conn, m) {
     const { user, chat } = conn.meta;
     if (m.t === 'receipt') {
-      // Tells the ORIGINAL SENDER whether the receiving HUMAN let the message through ('accepted') or refused it ('declined').
+      // Tells the ORIGINAL SENDER what happened to their message: the receiving HUMAN let it through ('accepted') or refused it
+      // ('declined'), then where it went ('shown' in the chat, waiting in the 'inbox', or 'read' by the agent).
       // Fixed vocabulary only; never carries free text. `to` names the original sender (required once a group has >2 members).
       const rlink = this.findLink(user, chat);
-      if (!rlink || !['accepted', 'declined'].includes(m.status)) return;
+      if (!rlink || !RECEIPT_STATUSES.includes(m.status)) return;
       const others = this.otherMembers(rlink, user, chat);
       const target = m.to ? others.find(o => o.user === String(m.to)) : (others.length === 1 ? others[0] : null);
       if (!target) return;
       const rw = this.connOf(target.user, target.chat);
       this.audit({ ev: 'receipt', linkId: rlink.id, from: user, to: target.user, id: String(m.id || '').slice(0, 64), status: m.status });
-      if (rw) rw.send({ t: 'receipt', id: String(m.id || '').slice(0, 64), from: user, status: m.status });
+      // A 0.2.x bridge treats every status that is not 'accepted' as 'declined', so it only gets the two it knows.
+      if (rw && (rw.meta.v >= 3 || m.status === 'accepted' || m.status === 'declined')) rw.send({ t: 'receipt', id: String(m.id || '').slice(0, 64), from: user, status: m.status });
       return;
     }
     if (m.t !== 'msg') return;

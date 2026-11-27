@@ -94,6 +94,8 @@ check('meta.from is the sender', got?.meta?.from === 'himnish');
 check('content is framed as UNTRUSTED', /UNTRUSTED message from himnish/.test(got?.content || ''));
 check('wrapper-forging characters neutralised', !/<\/channel>|<channel/.test(got?.content || ''), got?.content);
 const thread = got?.meta?.thread_id;
+const shownSeen = await waitFor(async () => JSON.parse((await H.call('link_status')).text).recentReceipts.find(x => x.status === 'shown' && x.to === 'aarush'));
+check('claude receiver sends shown after the channel push', !!shownSeen && shownSeen.id === got?.meta?.msg_id, JSON.stringify(shownSeen));
 
 // 6. reply keeps the thread
 r = await A.call('send_message', { text: 'ack, thinking', thread_id: thread });
