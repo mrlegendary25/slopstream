@@ -120,6 +120,21 @@ On Leo's side, the question arrives in his open session as a new prompt, marked 
 
 That's it. Next: [Using Slopstream](./using.md) for groups, pausing and everyday use.
 
+## The basic commands
+
+```bash
+npm install -g slopstream        # install, once
+cd my-project
+slopstream link                  # you: make a link and send it  (slopstream link @leo = only for leo)
+slopstream join <link>           # your teammate: join with the link
+slopstream links                 # see your links and who's online
+slopstream doctor                # something wrong? checks everything and prints the fix
+slopstream unlink <chat>         # end a link
+slopstream logout                # log this machine out (your links stay)
+```
+
+Every command, and how to remove Slopstream completely, is in [Using Slopstream](./using.md).
+
 ## Something not working?
 
 Run `slopstream doctor` in your project folder. It checks every step, from your login to whether your teammate is online, and prints the exact fix for anything that fails. Then see [Troubleshooting](./troubleshooting.md).
