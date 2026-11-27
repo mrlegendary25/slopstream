@@ -8,13 +8,15 @@ const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8'))
 const writeJson = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2)); fs.renameSync(f + '.tmp', f); };
 
 export class FileKV {
-  constructor(dir) {
+  constructor(dir, { auditMaxBytes = 10 * 1024 * 1024, auditRetentionDays = 30 } = {}) {
     fs.mkdirSync(dir, { recursive: true });
+    this.dir = dir; this.auditMaxBytes = auditMaxBytes; this.auditRetentionMs = auditRetentionDays * 86400000; this.appends = 0;
     this.usersFile = path.join(dir, 'users.json');
     this.linksFile = path.join(dir, 'links.json');
     this.auditFile = path.join(dir, 'audit.jsonl');
     this.stateFile = path.join(dir, 'state.json');
     this.state = readJson(this.stateFile, {});
+    this.pruneAudit();
   }
   get(k) {
     if (k === 'users') return readJson(this.usersFile, {});
@@ -37,5 +39,30 @@ export class FileKV {
   list(prefix) {
     return Object.entries(this.state).filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)]);
   }
-  appendAudit(o) { fs.appendFileSync(this.auditFile, JSON.stringify(o) + '\n'); }
+  appendAudit(o) {
+    fs.appendFileSync(this.auditFile, JSON.stringify(o) + '\n');
+    if (++this.appends % 100 === 0) this.rotateAudit();
+  }
+  // Past the size limit the live file is renamed to audit-<UTC time>.jsonl and a new one starts.
+  rotateAudit() {
+    try {
+      if (fs.statSync(this.auditFile).size <= this.auditMaxBytes) return;
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
+      let dest = path.join(this.dir, `audit-${stamp}.jsonl`);
+      for (let i = 1; fs.existsSync(dest); i++) dest = path.join(this.dir, `audit-${stamp}-${i}.jsonl`);
+      fs.renameSync(this.auditFile, dest);
+      this.pruneAudit();
+    } catch { /* the audit log must never break the relay */ }
+  }
+  // Rotated files older than the retention period are deleted.
+  pruneAudit() {
+    try {
+      const cutoff = Date.now() - this.auditRetentionMs;
+      for (const f of fs.readdirSync(this.dir)) {
+        if (!/^audit-.*\.jsonl$/.test(f)) continue;
+        const full = path.join(this.dir, f);
+        if (fs.statSync(full).mtimeMs < cutoff) fs.rmSync(full, { force: true });
+      }
+    } catch { /* best effort */ }
+  }
 }

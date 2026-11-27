@@ -8,6 +8,7 @@
 // periodic sweep(). No ws, no fs, no timers in here, so the same code runs in both places.
 // Wire format is A2A-shaped (contextId + parts[]) but this is NOT full A2A yet.
 
+import { migrate } from './migrations.js';
 import crypto from 'node:crypto';
 import { invitePage, gonePage, landingPage } from './html.js';
 
@@ -61,6 +62,7 @@ export class RelayCore {
     this.now = now;
     // A "link" is a group of 2..maxGroupSize chats that have all agreed to be reachable from one another.
     // { id, members: [{user, chat}, ...], createdAt }
+    migrate(kv); // before anything reads stored state
     this.links = kv.get('links') || [];
     this.conns = new Map();   // conn id -> conn
     this.online = new Map();  // "user chat" -> conn id (session connections only)

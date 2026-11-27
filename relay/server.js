@@ -18,7 +18,7 @@ const config = configFromEnv(process.env);
 if (!config.publicUrl) config.publicUrl = `http://${HOST}:${PORT}`;
 const MAX_GROUP_SIZE = config.maxGroupSize;
 
-const core = new RelayCore({ kv: new FileKV(DATA), config });
+const core = new RelayCore({ kv: new FileKV(DATA, { auditMaxBytes: Number(process.env.AUDIT_MAX_BYTES) || undefined, auditRetentionDays: Number(process.env.AUDIT_RETENTION_DAYS) || undefined }), config });
 
 const MAX_BODY = 4096;
 const server = http.createServer((req, res) => {

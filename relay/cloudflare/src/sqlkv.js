@@ -1,7 +1,7 @@
 // The KV contract (see dev plan §2.1) on Durable Object SQLite storage. Synchronous, like the Node FileKV.
 export class SqlKV {
-  constructor(sql) {
-    this.sql = sql; this.n = 0;
+  constructor(sql, { auditRetentionDays = 30 } = {}) {
+    this.sql = sql; this.n = 0; this.retentionMs = auditRetentionDays * 86400000;
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, data TEXT NOT NULL)');
   }
@@ -11,6 +11,6 @@ export class SqlKV {
   list(p) { return this.sql.exec('SELECT k, v FROM kv WHERE substr(k, 1, ?) = ?', p.length, p).toArray().map(r => [r.k, JSON.parse(r.v)]); }
   appendAudit(o) {
     this.sql.exec('INSERT INTO audit (ts, data) VALUES (?, ?)', Date.now(), JSON.stringify(o));
-    if (++this.n % 200 === 0) this.sql.exec('DELETE FROM audit WHERE ts < ?', Date.now() - 30 * 86400000); // 30-day retention
+    if (++this.n % 200 === 0) this.sql.exec('DELETE FROM audit WHERE ts < ?', Date.now() - this.retentionMs);
   }
 }
