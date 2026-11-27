@@ -136,7 +136,7 @@ async function main() {
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
       const until = new Date(Date.now() + c.expiresInSec * 1000).toLocaleString();
-      console.log(`\nSend this to your friend:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
+      console.log(`\nSend this to your teammate:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
       const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
       process.on('SIGINT', stays); ws.on('close', stays);
       const req = await nextMsg(ws, ['pair_request'], 0, mine);
@@ -397,18 +397,18 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       break;
     }
     default:
-      console.log(`slopstream: seamless slop grenades. Safety pin included.
+      console.log(`slopstream: your agent can ask mine.
 
 usage: slopstream <command>
-  link [chat] [--agent claude|codex] [--add]   make an invite link for this folder and wait for your friend
-  join <code-or-link> [chat]         link this folder to a friend's invite
+  link [chat] [--agent claude|codex] [--add]   make an invite link for this folder and wait for your teammate
+  join <code-or-link> [chat]         link this folder to a teammate's invite
   login [--relay <url>]              log in with GitHub (once per machine)
   whoami                             show who you are logged in as and check it works
   devices [revoke <id>]              list (or revoke) the devices logged in as you
   logout                             revoke this device and forget the login
   setup <relay-url> <user> <token>   save credentials of a self-hosted relay (once per machine)
-  pair-create <chat> [--yes]         make a pairing code for a chat, wait for friend, approve
-  pair-accept <code> <chat>          accept a friend's code for one of your chats
+  pair-create <chat> [--yes]         make a pairing code for a chat, wait for teammate, approve
+  pair-accept <code> <chat>          accept a teammate's code for one of your chats
   invite <chat> [--yes]              add another person to a chat that is ALREADY linked (up to the relay's group limit)
   requests                           list your open invites and who has used them
   approve <code> [--yes]             approve someone who used your invite (also works later, after you closed pair-create)
@@ -426,7 +426,7 @@ usage: slopstream <command>
                                       relay/server.js process on this machine.
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
-  demo up|status|peer|down           test everything on THIS laptop alone (see TESTING.md)
+  demo up|status|peer|down           test everything on THIS machine alone (see docs/testing.md)
   simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
   }
 }

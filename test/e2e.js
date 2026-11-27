@@ -45,10 +45,13 @@ check('links listed', /projX\s+<->\s+aarush\/projX/.test(cli('h', 'links')));
 // 3b. naming + init (guards the product name: command, MCP server name, settings folder, markers)
 const CLI = path.join(ROOT, 'bridge/cli.js');
 const fakeHome = path.join(TMP, 'fakehome'); fs.mkdirSync(fakeHome);
-const envNoHome = { ...process.env, HOME: fakeHome }; delete envNoHome.SLOPSTREAM_HOME;
+// os.homedir() reads HOME on macOS/Linux and USERPROFILE on Windows.
+const envNoHome = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome }; delete envNoHome.SLOPSTREAM_HOME;
 execFileSync('node', [CLI, 'setup', RELAY, 'himnish', tok.himnish], { env: envNoHome });
 const defCfg = path.join(fakeHome, '.slopstream', 'config.json');
-check('default settings folder is ~/.slopstream, readable only by the owner', fs.existsSync(defCfg) && (fs.statSync(defCfg).mode & 0o777) === 0o600);
+// Windows has no POSIX permission bits; there the user-profile ACL is what keeps the file private.
+const ownerOnly = process.platform === 'win32' || (fs.statSync(defCfg).mode & 0o777) === 0o600;
+check('default settings folder is ~/.slopstream, readable only by the owner', fs.existsSync(defCfg) && ownerOnly);
 const projDir = path.join(TMP, 'proj'); fs.mkdirSync(projDir);
 for (let i = 0; i < 2; i++) execFileSync('node', [CLI, 'init', 'projX'], { cwd: projDir, env: env('h') });
 const mcpJson = JSON.parse(fs.readFileSync(path.join(projDir, '.mcp.json'), 'utf8'));
@@ -57,7 +60,7 @@ check('init writes .mcp.json entry "slopstream" with SLOPSTREAM_CHAT and the bri
   entry?.env?.SLOPSTREAM_CHAT === 'projX' && /bridge[\\/]server\.js$/.test(entry?.args?.[0] || ''));
 const mdText = fs.readFileSync(path.join(projDir, 'CLAUDE.md'), 'utf8');
 check('init adds the safety-rules block exactly once (idempotent)', (mdText.match(/<!-- slopstream:start -->/g) || []).length === 1 && /ANOTHER PERSON'S AI AGENT/.test(mdText));
-check('help text carries the tagline', /seamless slop grenades/i.test(execFileSync('node', [CLI], { encoding: 'utf8' })));
+check('help text carries the tagline', /your agent can ask mine/i.test(execFileSync('node', [CLI], { encoding: 'utf8' })));
 
 // 4. bridges
 async function startBridge(home, chat) {

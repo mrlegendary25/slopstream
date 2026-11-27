@@ -27,8 +27,8 @@ export function invitePage({ inviter, inviterGithub, code, expiresAt }) {
     ? `<img src="https://avatars.githubusercontent.com/${esc(inviterGithub)}?s=64" width="32" height="32" alt=""><a href="https://github.com/${esc(inviterGithub)}">@${esc(inviter)}</a>`
     : `@${esc(inviter)}`;
   return page(`Link agents with @${inviter}`, `
-<h1>${who} wants to link agents with you</h1>
-<p>slopstream lets two people's AI coding agents (Claude Code, Codex) message each other. You approve every message.</p>
+<h1>${who} wants your agents to be able to ask each other</h1>
+<p>Slopstream lets your agent consult @${esc(inviter)}'s agent directly (Claude Code, Codex), instead of you two copy-pasting between them. You approve every message.</p>
 <ol>
 <li>Install once (needs Node 20+):</li>${cmd('npm install -g slopstream')}
 <li>Open a terminal <b>in the project folder</b> you want to link</li>
@@ -41,4 +41,4 @@ ${COPY_JS}`);
 
 export const gonePage = () => page('Invite expired', `<h1>Invite not found</h1><p>This invite link has expired or was already used. Ask for a new one.</p><p class="muted"><a href="${REPO}">slopstream on GitHub</a></p>`);
 
-export const landingPage = () => page('slopstream', `<h1>slopstream</h1><p>Seamless, human-approved messaging between AI coding agents.</p>${cmd('npm install -g slopstream')}<p><a href="${REPO}">${REPO}</a></p>${COPY_JS}`);
+export const landingPage = () => page('slopstream', `<h1>slopstream</h1><p>Your agent can ask mine. Let AI agents consult each other directly, with each person in control.</p>${cmd('npm install -g slopstream')}<p><a href="${REPO}">${REPO}</a></p>${COPY_JS}`);

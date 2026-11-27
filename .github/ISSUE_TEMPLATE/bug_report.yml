@@ -1,0 +1,37 @@
+name: Bug report
+description: Something doesn't work as the docs say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issue? Please don't file it here. Report it privately: see SECURITY.md.
+        Remove any private message text from logs before pasting them.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. slopstream link
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `slopstream status`, plus your OS, `node -v`, and `claude --version` or `codex --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: From `~/.slopstream/log.jsonl`, with message text removed.
+      render: text

@@ -31,12 +31,19 @@ const cfgC = { relay: RELAY, user: 'cla', token: addUser('cla') }; const cfgX = 
 saveConfig(cfgC, homeC); saveConfig(cfgX, homeX);
 await pairBoth(cfgC, 'cc', cfgX, 'xx');
 
-// fake codex + scripted approver
-const fakeCodex = path.join(TMP, 'fake-codex.sh'); const codexLog = path.join(TMP, 'codex-calls.log');
-fs.writeFileSync(fakeCodex, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done >> "${codexLog}"\nprintf '=====\\n' >> "${codexLog}"\n`, { mode: 0o755 });
+// fake codex + scripted approver, written as Node scripts so they run on macOS, Linux and Windows
+const WIN = process.platform === 'win32';
+const nodeCmd = (...args) => [`"${process.execPath}"`, ...args].join(' '); // for SLOPSTREAM_GATE_CMD (run via a shell)
+const codexLog = path.join(TMP, 'codex-calls.log');
+const fakeCodexJs = path.join(TMP, 'fake-codex.js');
+fs.writeFileSync(fakeCodexJs, `#!/usr/bin/env node\nrequire('fs').appendFileSync(${JSON.stringify(codexLog)}, process.argv.slice(2).map(a => a + '\\n').join('') + '=====\\n');\n`, { mode: 0o755 });
+// On Windows the bridge expects an npm-style .cmd shim and runs the .js it points to (see resolveWindowsBin).
+const fakeCodex = WIN ? path.join(TMP, 'fake-codex.cmd') : fakeCodexJs;
+if (WIN) fs.writeFileSync(fakeCodex, '@ECHO off\r\n"%~dp0\\node.exe"  "%~dp0\\fake-codex.js" %*\r\n');
 const gateLog = path.join(TMP, 'gate.log'); const denyFlag = path.join(TMP, 'deny');
-const gateSh = path.join(TMP, 'gate.sh');
-fs.writeFileSync(gateSh, `#!/bin/sh\ncat >> "${gateLog}"; printf '\\n' >> "${gateLog}"\n[ -f "${denyFlag}" ] && exit 1\nexit 0\n`, { mode: 0o755 });
+const gateJs = path.join(TMP, 'gate.js');
+fs.writeFileSync(gateJs, `const fs = require('fs'); let s = '';\nprocess.stdin.on('data', d => { s += d; });\nprocess.stdin.on('end', () => { fs.appendFileSync(${JSON.stringify(gateLog)}, s + '\\n'); process.exit(fs.existsSync(${JSON.stringify(denyFlag)}) ? 1 : 0); });\n`);
+const gateSh = nodeCmd(`"${gateJs}"`);
 
 async function startBridge(home, chat, extra = {}) {
   const pushes = [];
@@ -105,9 +112,10 @@ const gotC = await waitFor(() => C.pushes[0]);
 check('Claude side receives it as a channel push, labelled untrusted', /UNTRUSTED message from cod/.test(gotC?.content || ''));
 await X.client.close();
 
-// no approver available (Linux, no SLOPSTREAM_GATE_CMD) -> refuses instead of sending
+// no approver available (Linux/Windows, no SLOPSTREAM_GATE_CMD, no dialog) -> refuses instead of sending
 if (process.platform !== 'darwin') {
-  const Y = await startBridge(homeX, 'xx', { SLOPSTREAM_AGENT: 'codex' });
+  // On Windows, point at a PowerShell that doesn't exist: CI has no desktop to show the dialog on.
+  const Y = await startBridge(homeX, 'xx', { SLOPSTREAM_AGENT: 'codex', ...(WIN ? { SLOPSTREAM_PWSH: path.join(TMP, 'no-such-powershell.exe') } : {}) });
   await waitFor(async () => (await Y.status()).peerOnline);
   r = await Y.call('send_message', { text: 'no approver' });
   check('no approver available -> send refused (fails closed)', r.err && /not approve/.test(r.text), r.text);
@@ -128,7 +136,7 @@ check('init codex: AGENTS.md rules block exactly once', (read(path.join(proj, 'A
 
 // solo demo, end to end, with two no-AI stand-ins
 const fakeHome = path.join(TMP, 'fakehome'); fs.mkdirSync(fakeHome);
-const denv = { ...process.env, HOME: fakeHome, SLOPSTREAM_GATE_CMD: 'true', SLOPSTREAM_NOTIFY: 'off', SLOPSTREAM_ALLOW_NONINTERACTIVE: '1' }; delete denv.SLOPSTREAM_HOME;
+const denv = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, SLOPSTREAM_GATE_CMD: nodeCmd('-e', '0'), SLOPSTREAM_NOTIFY: 'off', SLOPSTREAM_ALLOW_NONINTERACTIVE: '1' }; delete denv.SLOPSTREAM_HOME;
 const up = execFileSync('node', [CLI, 'demo', 'up', '--a', 'claude', '--b', 'codex', '--port', '18791'], { env: denv, encoding: 'utf8' });
 check('demo up reports ready', /DEMO READY/.test(up), up);
 check('demo up wired both folders', fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-a/.mcp.json')) && fs.existsSync(path.join(fakeHome, '.slopstream-demo/folder-b/.codex/config.toml')));

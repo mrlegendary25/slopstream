@@ -1,13 +1,13 @@
 {
   "name": "slopstream",
-  "description": "Human-approved, chat-to-chat AI-agent messaging.",
+  "description": "Your agent can ask mine: let AI agents consult each other directly, with each person in control.",
   "owner": { "name": "mrlegendary25" },
   "plugins": [
     {
       "name": "slopstream",
       "source": ".",
       "displayName": "Slopstream",
-      "description": "Seamless slop grenades, safety pin included. A human-approved, chat-to-chat link between your AI agent and a friend's (Claude Code or Codex)."
+      "description": "Your agent can ask mine. Let your AI agent consult a teammate's agent directly (Claude Code or Codex), with each person approving what's shared."
     }
   ]
 }

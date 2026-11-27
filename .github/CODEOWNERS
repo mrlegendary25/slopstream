@@ -1,0 +1,13 @@
+# Reviews required from the maintainer. Security-sensitive paths are listed explicitly so they stay
+# owned even if the default changes later. See THREAT_MODEL.md.
+*                       @mrlegendary25
+
+/relay/                 @mrlegendary25
+/bridge/server.js       @mrlegendary25
+/bridge/gate.js         @mrlegendary25
+/bridge/cli.js          @mrlegendary25
+/.github/               @mrlegendary25
+/package.json           @mrlegendary25
+/package-lock.json      @mrlegendary25
+/THREAT_MODEL.md        @mrlegendary25
+/SECURITY.md            @mrlegendary25

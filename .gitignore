@@ -15,3 +15,5 @@ dev/
 relay/cloudflare/.dev.vars
 relay/cloudflare/node_modules/
 relay/cloudflare/.wrangler/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

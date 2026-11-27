@@ -30,7 +30,7 @@ npx wrangler login     # once, opens a browser
 npx wrangler deploy
 ```
 
-Set `PUBLIC_URL` and `GITHUB_CLIENT_ID` in `wrangler.jsonc` first (see `dev/phase-1-hosted-relay.md`, T7).
+Set `name`, `PUBLIC_URL` and `GITHUB_CLIENT_ID` in `wrangler.jsonc` first. The full walkthrough, including creating the GitHub OAuth App, is in [docs/self-hosting.md](../../docs/self-hosting.md).
 
 ## Environment variables
 
