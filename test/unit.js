@@ -2,6 +2,7 @@
 process.env.SLOPSTREAM_KEYCHAIN = 'off';
 import fs from 'node:fs';
 import { ERRORS, RelayError, explain } from '../bridge/errors.js';
+import { VERSION, cmpVersion } from '../bridge/version.js';
 
 let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('PASS ', name); } else { fail++; console.log('FAIL ', name, extra); } };
@@ -26,6 +27,14 @@ check('explain always ends with a next step', Object.keys(ERRORS).every(c => /\n
 check('explain handles an unknown code', /→/.test(explain('brand_new_code', 'something odd')) && /something odd/i.test(explain('brand_new_code', 'something odd')));
 check('explain ignores a message that is just the code', !explain('peer_offline', 'peer_offline').includes('peer_offline'));
 check('RelayError carries the code', new RelayError('auth', 'x').code === 'auth');
+
+// --- versions ---
+check('cmpVersion: 0.10.0 > 0.9.9', cmpVersion('0.10.0', '0.9.9') === 1);
+check('cmpVersion: equal', cmpVersion('1.2.3', '1.2.3') === 0);
+check('cmpVersion: older is -1', cmpVersion('0.2.1', '0.3.0') === -1);
+check('cmpVersion: pre-release suffix ignored', cmpVersion('0.3.0-beta.1', '0.3.0') === 0);
+check('cmpVersion: garbage counts as 0.0.0', cmpVersion('nope', '0.0.1') === -1 && cmpVersion(undefined, '0.0.0') === 0);
+check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

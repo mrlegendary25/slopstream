@@ -11,7 +11,7 @@
 import crypto from 'node:crypto';
 import { invitePage, gonePage, landingPage } from './html.js';
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
 const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
@@ -25,6 +25,9 @@ const html = (status, body) => ({ status, body, headers: {
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https://avatars.githubusercontent.com" } });
 const key = (user, chat) => `${user} ${chat}`;
+// numeric major.minor.patch compare; a missing or invalid version counts as 0.0.0. (The relay must not import from bridge/.)
+const verParts = (v) => { const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0]; };
+const verLess = (a, b) => { const x = verParts(a), y = verParts(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; };
 const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const displayCode = (c) => c.slice(0, 5) + '-' + c.slice(5);
 
@@ -46,6 +49,7 @@ export function configFromEnv(env) {
     maxOpenInvites: num(env.MAX_OPEN_INVITES, 20),
     maxDevices: num(env.MAX_DEVICES, 20),
     maxLinks: num(env.MAX_LINKS, 50),
+    minClientVersion: str(env.MIN_CLIENT_VERSION, ''),
   };
 }
 
@@ -142,7 +146,7 @@ export class RelayCore {
     if (method === 'GET' && path === '/healthz') return json(200, { ok: true, protocol: PROTOCOL });
     if (method === 'GET' && path === '/v1/info') {
       const c = this.config;
-      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, publicUrl: c.publicUrl, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
+      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, publicUrl: c.publicUrl, minClientVersion: c.minClientVersion, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
     }
     if (method === 'GET' && path.startsWith('/v1/invite/')) {
       const inv = this.getInvite(decodeURIComponent(path.slice('/v1/invite/'.length)));
@@ -348,6 +352,12 @@ export class RelayCore {
     // Which kind of agent is behind this session (claude, codex, console...). Informational only.
     meta.agent = /^[a-z0-9_-]{1,20}$/.test(String(m.agent || '')) ? String(m.agent) : 'unknown';
     meta.v = Number(m.v) || 1;
+    meta.clientVersion = /^\d+\.\d+\.\d+/.test(String(m.clientVersion || '')) && String(m.clientVersion).length <= 20 ? String(m.clientVersion) : '0.0.0';
+    const minV = this.config.minClientVersion;
+    if (minV && verLess(meta.clientVersion, minV)) {
+      conn.send({ t: 'error', code: 'upgrade_required', message: `this relay needs slopstream ${minV} or newer`, minVersion: minV });
+      return conn.close(4010, 'upgrade required');
+    }
     const welcomeBase = { t: 'welcome', user: meta.user, protocol: PROTOCOL };
 
     if (!m.chat) { meta.mode = 'admin'; conn.saveMeta(); return conn.send({ ...welcomeBase, mode: 'admin' }); }
@@ -369,7 +379,7 @@ export class RelayCore {
     this.online.set(k, meta.id);
     conn.send({ ...welcomeBase, mode: 'session', link: { id: link.id }, members: this.otherMembers(link, user, chat) });
     this.broadcastMembers(link); // tell everyone else in the group this chat just came online
-    this.audit({ ev: 'online', user, chat, linkId: link.id });
+    this.audit({ ev: 'online', user, chat, linkId: link.id, clientVersion: meta.clientVersion });
   }
 
   handle(conn, m) {

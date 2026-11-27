@@ -10,6 +10,7 @@ import { execSync } from 'node:child_process';
 import { loadConfig, saveConfig, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
+import { maybeNotifyUpdate } from './update-check.js';
 import { RelayError, explain } from './errors.js';
 import { runLogin } from './login.js';
 import { httpBase, getJson } from './http.js';
@@ -431,4 +432,5 @@ usage: slopstream <command>
   simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
   }
 }
-main().then(() => process.exit(process.exitCode || 0)).catch((e) => die(e instanceof RelayError ? explain(e.code, e.message) : `error: ${e.message}`));
+const quiet = cmd === 'codex-hook' || cmd === 'simulate' || (cmd === 'demo' && rest[0] === 'peer');
+main().then(() => (quiet ? null : maybeNotifyUpdate())).then(() => process.exit(process.exitCode || 0)).catch((e) => die(e instanceof RelayError ? explain(e.code, e.message) : `error: ${e.message}`));

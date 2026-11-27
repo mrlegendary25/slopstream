@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import { loadConfig, logLine, codexThreadFile, pausedFile } from './config.js';
 import { makeGate, notify } from './gate.js';
 import { explain, reasonCode } from './errors.js';
+import { VERSION } from './version.js';
 
 const cfg = loadConfig();
 const CHAT = process.env.SLOPSTREAM_CHAT || path.basename(process.cwd());
@@ -65,7 +66,7 @@ const INSTRUCTIONS = PUSH
     ].join('\n');
 
 const mcp = new Server(
-  { name: 'slopstream', version: '0.4.0' },
+  { name: 'slopstream', version: VERSION },
   {
     capabilities: { tools: {}, ...(PUSH ? { experimental: { 'claude/channel': {} } } : {}) },
     instructions: INSTRUCTIONS,
@@ -311,7 +312,7 @@ function connect() {
   state.ws = ws;
   let lastPong = Date.now(); let hb = null;
   ws.on('open', () => {
-    ws.send(JSON.stringify({ t: 'hello', v: 2, user: cfg.user, token: cfg.token, chat: CHAT, agent: AGENT }));
+    ws.send(JSON.stringify({ t: 'hello', v: 3, clientVersion: VERSION, user: cfg.user, token: cfg.token, chat: CHAT, agent: AGENT }));
     // Proxies drop idle WebSockets. The literal string matters: Cloudflare answers it without waking the relay.
     hb = setInterval(() => {
       if (Date.now() - lastPong > 60000) { ws.terminate(); return; }
@@ -348,6 +349,7 @@ function connect() {
       case 'error':
         if (m.code === 'not_linked') state.fatal = `FATAL: chat "${CHAT}" is not linked. Run in a terminal: slopstream link   (or: slopstream join <code>)`;
         else if (m.code === 'auth') state.fatal = `FATAL: the relay rejected your login. Run: ${cfg.auth === 'github' ? 'slopstream login' : 'slopstream setup <relay-url> <user> <token>'}`;
+        else if (m.code === 'upgrade_required') state.fatal = `FATAL: ${m.message || 'this relay needs a newer slopstream'}. Run: npm install -g slopstream@latest   (Claude plugin users: /plugin update slopstream)`;
         else if (m.code === 'duplicate') state.fatal = null; // stale connection; retry
         else err('relay error', m.code, m.message);
         if (state.fatal) err(state.fatal);

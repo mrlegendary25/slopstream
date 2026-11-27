@@ -158,7 +158,7 @@ function world(env = {}, kv2 = newKv()) {
 
   const w = mk();
   const info = await get(w, '/v1/info');
-  check('/v1/info with client id', info.j.github === true && info.j.publicUrl === 'https://r.test' && info.j.protocol === 2);
+  check('/v1/info with client id', info.j.github === true && info.j.publicUrl === 'https://r.test' && info.j.protocol === 3 && info.j.minClientVersion === '');
   check('/v1/info without client id', (await get(mk({ GITHUB_CLIENT_ID: '' }), '/v1/info')).j.github === false);
   check('start without client id -> 404', (await post(mk({ GITHUB_CLIENT_ID: '' }), '/v1/auth/github/start', {})).status === 404);
 
@@ -178,7 +178,7 @@ function world(env = {}, kv2 = newKv()) {
   check('device label sanitized', w.kv.list('device:')[0][1].label === 'my laptop');
   check('no GitHub token stored anywhere', !JSON.stringify([...w.kv.m]).includes('gho-x'));
   const s1 = helloOn(w, 'dana', ok1.token);
-  check('device token authenticates a hello', last(s1, 'welcome')?.user === 'dana' && last(s1, 'welcome')?.protocol === 2);
+  check('device token authenticates a hello', last(s1, 'welcome')?.user === 'dana' && last(s1, 'welcome')?.protocol === 3);
   const s1b = helloOn(w, '', ok1.token);
   check('device token works without a user field', last(s1b, 'welcome')?.user === 'dana');
   const mismatch = helloOn(w, 'alice', ok1.token);
@@ -261,6 +261,23 @@ function world(env = {}, kv2 = newKv()) {
   s1.activity = clock - 80000; // silent for 80 s: a zombie
   const s3 = sess('alice', 'ta');
   check('zombie session is replaced (old closed 4008)', s1.closed?.c === 4008 && last(s3, 'welcome')?.mode === 'session');
+}
+
+// ---- T2: client version gate ----
+{
+  const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };
+  const hi = (c2, extra) => { const c = new FakeConn(); c2.openConn(c, { ip: '5.5.5.5' }); c2.onMessage(c, JSON.stringify({ t: 'hello', v: 3, user: 'alice', token: 'ta', ...extra })); return c; };
+  const g = mkv({ MIN_CLIENT_VERSION: '0.3.0' });
+  const old = hi(g.c2, { clientVersion: '0.2.1' });
+  check('hello with clientVersion below MIN_CLIENT_VERSION -> upgrade_required + 4010', last(old, 'error')?.code === 'upgrade_required' && last(old, 'error')?.minVersion === '0.3.0' && old.closed?.c === 4010 && !last(old, 'welcome'));
+  check('hello without clientVersion is refused when a minimum is set', hi(g.c2, {}).closed?.c === 4010);
+  check('hello at the minimum is accepted', last(hi(g.c2, { clientVersion: '0.3.0' }), 'welcome')?.mode === 'admin');
+  check('0.10.0 is newer than 0.9.0 (numeric compare)', last(hi(mkv({ MIN_CLIENT_VERSION: '0.9.0' }).c2, { clientVersion: '0.10.0' }), 'welcome') !== undefined);
+  const free = mkv({});
+  check('hello without clientVersion is allowed when no minimum is set', last(hi(free.c2, {}), 'welcome')?.mode === 'admin');
+  const infoOf = async (c2) => JSON.parse((await c2.handleHttp({ method: 'GET', path: '/v1/info', body: '', ip: '' })).body);
+  const gi = await infoOf(g.c2);
+  check('/v1/info reports protocol 3 and minClientVersion', gi.protocol === 3 && gi.minClientVersion === '0.3.0');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

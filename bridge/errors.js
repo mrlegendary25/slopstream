@@ -28,6 +28,7 @@ export const ERRORS = {
   github_unavailable: { msg: 'The relay could not reach GitHub.', fix: 'Try again in a minute.' },
   name_taken: { msg: 'That username is already used on this relay.', fix: 'Log in again and pick another name: slopstream login' },
   bad_json: { msg: 'The relay could not read that request.', fix: 'Update slopstream: npm install -g slopstream@latest' },
+  upgrade_required: { msg: 'This relay needs a newer slopstream.', fix: 'Run: npm install -g slopstream@latest   (Claude plugin: /plugin update slopstream)' },
   // Bridge-side reasons (no relay code)
   timeout: { msg: 'The relay did not answer in time.', fix: 'Check your connection, then try again. Run: slopstream doctor' },
   relay_disconnected: { msg: 'The connection to the relay dropped.', fix: 'It reconnects on its own; try again in a few seconds.' },

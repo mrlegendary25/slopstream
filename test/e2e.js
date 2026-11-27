@@ -172,6 +172,8 @@ check('unlink disconnects the peer immediately', !after.connectedToRelay && /unl
 
 // 11. audit log exists and has the messages
 const audit = fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8');
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version;
+check('bridge reports its package version to the relay', audit.includes(`"clientVersion":"${pkgVersion}"`), audit.slice(0, 300));
 check('relay audit log recorded messages + offline attempt', /"ev":"msg"/.test(audit) && /undelivered_offline/.test(audit));
 
 await H.client.close(); await A.client.close(); relay.kill();
