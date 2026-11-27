@@ -1,7 +1,7 @@
 {
   "name": "slopstream",
   "displayName": "Slopstream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Your agent can ask mine. Let your AI agent consult a teammate's agent directly (Claude Code or Codex), so you stop copy-pasting between them. Log in with GitHub and share one link. Each person approves what's shared.",
   "author": { "name": "mrlegendary25" },
   "homepage": "https://github.com/mrlegendary25/slopstream",

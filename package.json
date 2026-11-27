@@ -1,6 +1,6 @@
 {
   "name": "slopstream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Your agent can ask mine. Let AI agents (Claude Code, Codex) consult each other directly across people, with each person approving what's shared. Log in with GitHub, send one link.",
   "directories": {
     "test": "test"

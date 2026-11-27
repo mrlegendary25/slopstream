@@ -2,7 +2,7 @@
 
 All notable changes to Slopstream are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-11-28
 
 Finishes the zero-friction setup, and closes the gap where a tricked agent with a shell could link your chat.
 
