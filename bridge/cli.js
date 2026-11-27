@@ -7,12 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { execSync } from 'node:child_process';
-import { loadConfig, saveConfig, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
+import { loadConfig, saveConfig, deleteSecret, configFile, DEFAULT_RELAY, codexThreadFile, pausedFile, defaultHome } from './config.js';
 import { admin, nextMsg, normCode } from './net.js';
 import { runInit } from './init.js';
-import { runLogin } from './login.js';
+import { maybeNotifyUpdate } from './update-check.js';
+import { RelayError, explain } from './errors.js';
+import { detectAgents, chooseAgent, describeChoice } from './agents.js';
+import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runStatus } from './status.js';
+import { runDoctor } from './doctor.js';
 import { runSimulate } from './simulate.js';
 import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 
@@ -39,8 +43,16 @@ function defaultChat(cwd) {
 }
 
 // Wire this folder up and say what to do next. Called BEFORE waiting, so the folder is ready even if the terminal closes.
-function initFolder(chat) {
-  const r = runInit({ chat, agent: opt('agent') || 'claude', cwd: process.cwd(), home: opt('home') });
+// Which agent this folder is for: --agent, else what's installed and what the folder already has (bridge/agents.js).
+async function pickAgent() {
+  const choice = await chooseAgent({ flag: opt('agent'), detected: detectAgents({ cwd: process.cwd() }), isTTY: !!(process.stdin.isTTY && process.stdout.isTTY), ask });
+  if (!opt('agent')) console.log(describeChoice(choice));
+  for (const w of choice.warnings) console.log(`WARNING: ${w}`);
+  return choice.agent;
+}
+
+async function initFolder(chat) {
+  const r = runInit({ chat, agent: await pickAgent(), cwd: process.cwd(), home: opt('home') });
   console.log(`Set up ${r.agent} in ${process.cwd()}: wrote ${r.written.join(' and ')}`);
   for (const w of r.warnings || []) console.log(`WARNING: ${w}`);
   return r;
@@ -53,10 +65,35 @@ const peersOf = (members) => members.map(p => `${p.user}/${p.chat}`).join(', ');
 const who = (u) => `@${u.user}${u.github ? ` (github.com/${u.github})` : ''}`;
 
 async function ensureLoggedIn(relay) {
-  return loadConfig() || await runLogin({ relay });
+  return loadHuman() || await runLogin({ relay });
 }
 
-const needCfg = () => loadConfig() || die('Not set up. Run: slopstream login');
+// Does this relay want a click in the browser (signed in to GitHub) before a chat becomes reachable by someone new?
+// Then the browser page IS the approval, so the terminal y/N is skipped. An old relay has no such flag: the terminal flow stays.
+async function browserConfirms(cfg) {
+  if (cfg.auth !== 'github') return false;
+  try { return (await getJson(`${httpBase(cfg.relay)}/v1/info`)).confirmLinks === true; } catch { return false; }
+}
+
+// Like nextMsg, but if the relay parks the request until the person confirms in the browser, show the link and keep waiting.
+// `retryHint` says what to run when the confirmation expires before anyone clicked.
+async function waitConfirming(ws, cfg, types, mine, retryHint, firstTimeout = 0) {
+  let timeout = firstTimeout;
+  for (;;) {
+    const m = await nextMsg(ws, [...types, 'confirm_required', 'confirm_expired', 'confirm_declined'], timeout, mine);
+    if (m.t === 'confirm_required') {
+      console.log(`\nApprove in your browser: ${m.url}   (link expires in ${Math.max(1, Math.round(m.expiresInSec / 60))} minutes)`);
+      openBrowser(m.url, { allowOrigin: httpBase(cfg.relay) });
+      timeout = 0; continue;
+    }
+    if (m.t === 'confirm_expired') die(`The confirmation expired. Nothing was linked.\n  → ${retryHint}`);
+    if (m.t === 'confirm_declined') die('You declined in the browser. Nothing was linked.');
+    return m;
+  }
+}
+
+const loadHuman = () => loadConfig(defaultHome(), { migrate: true }); // human commands only: moves an old plain-file token into the keychain
+const needCfg = () => loadHuman() || die('Not set up. Run: slopstream login');
 
 // The relay writes a pidfile on start (relay/server.js). That is the primary lookup and works on
 // every OS. `pgrep` stays as a Unix-only fallback so a relay started before pidfiles existed, or
@@ -120,7 +157,9 @@ async function main() {
     case 'link': {
       requireHuman('link');
       const cfg = await ensureLoggedIn(DEFAULT_RELAY);
-      const chat = rest[0] || defaultChat(process.cwd());
+      // `link @alice [chat]`: an invite only @alice can use. Otherwise `link [chat]` makes a link anyone you send it to can use.
+      const target = rest[0]?.startsWith('@') ? rest[0].slice(1) : null;
+      const chat = (target ? rest[1] : rest[0]) || defaultChat(process.cwd());
       console.log(`Chat label: ${chat}`);
       const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'list_links' }));
@@ -131,19 +170,21 @@ async function main() {
         const peers = peersOf(mineLink.members.filter(m => !(m.user === cfg.user && m.chat === chat)));
         die(`"${chat}" is already linked with ${peers}. To add another person to that group, run: slopstream link --add`);
       }
-      const init = args.includes('--no-init') ? null : initFolder(chat);
-      ws.send(JSON.stringify({ t: add ? 'invite_create' : 'pair_create', chat }));
+      const init = args.includes('--no-init') ? null : await initFolder(chat);
+      ws.send(JSON.stringify({ t: add ? 'invite_create' : 'pair_create', chat, ...(target ? { for: target } : {}) }));
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
       const until = new Date(Date.now() + c.expiresInSec * 1000).toLocaleString();
-      console.log(`\nSend this to your teammate:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
+      console.log(`\nSend this to ${target ? `@${target}` : 'your teammate'}:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once${target ? `, and only @${target} can use it` : ''}). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
+      if (target) console.log(`If @${target} uses slopstream on this relay, they'll also see it in: slopstream requests`);
       const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
       process.on('SIGINT', stays); ws.on('close', stays);
+      const viaBrowser = await browserConfirms(cfg);
       const req = await nextMsg(ws, ['pair_request'], 0, mine);
       console.log(`\n${who(req.from)} wants to link their chat "${req.from.chat}" with your chat "${chat}".`);
-      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      const ok = viaBrowser || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, mine);
+      const r = await waitConfirming(ws, cfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${req.code}`);
       ws.off('close', stays); process.off('SIGINT', stays);
       if (r.t === 'paired') { console.log(`Linked! ${chat} <-> ${peersOf(r.members)}`); printStart(init); } else console.log('Denied.');
       ws.close(); break;
@@ -158,21 +199,22 @@ async function main() {
         code = normCode(u.pathname.split('/j/')[1] || '');
       } else code = normCode(input);
       if (!code) die('That does not look like an invite code or link.');
-      let cfg = loadConfig();
+      let cfg = loadHuman();
       if (cfg && relayFromUrl && httpBase(cfg.relay) !== httpBase(relayFromUrl)) {
         die(`This invite is for ${relayFromUrl} but you're logged in to ${cfg.relay}. Run: slopstream logout, then try again.`);
       }
       cfg = cfg || await runLogin({ relay: relayFromUrl || DEFAULT_RELAY });
       const inv = await getJson(`${httpBase(cfg.relay)}/v1/invite/${code}`);
-      if (inv.status === 'used') die('That invite was already used. Ask for a new one.');
-      if (inv.status !== 'open') die('That invite is unknown or has expired. Ask for a new one.');
+      if (inv.status === 'used') die(explain('bad_code', 'That invite was already used.'));
+      if (inv.status !== 'open') die(explain('bad_code', 'That invite is unknown or has expired.'));
       const chat = rest[1] || defaultChat(process.cwd());
       console.log(`Link this folder (chat "${chat}") with @${inv.inviter}'s chat "${inv.chat}"?\nTheir agent will be able to send messages here; you approve each one.`);
-      if (!yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
-      const init = args.includes('--no-init') ? null : initFolder(chat);
+      const viaBrowser = await browserConfirms(cfg);
+      if (!viaBrowser && !yes && !/^y(es)?$/i.test((await ask('[y/N] ')).trim())) die('Cancelled.');
+      const init = args.includes('--no-init') ? null : await initFolder(chat);
       const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      await nextMsg(ws, ['pair_waiting'], 5000);
+      await waitConfirming(ws, cfg, ['pair_waiting'], (m) => normCode(m.code) === code, 'Run the same command again: slopstream join ' + input, 8000);
       console.log(`Waiting for @${inv.inviter} to approve... (you can close this; check later with: slopstream links)`);
       const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === code);
       if (r.t === 'paired') { console.log(`Linked! ${chat} <-> ${peersOf(r.members)}`); printStart(init); } else console.log('Denied by the other side.');
@@ -186,7 +228,7 @@ async function main() {
       const cfg = needCfg();
       console.log(`${cfg.user} on ${cfg.relay}`);
       try { (await admin(cfg)).close(); console.log('✓ login works'); }
-      catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+      catch (e) { console.error(`✗ ${e instanceof RelayError ? explain(e.code, e.message) : e.message}`); process.exit(1); }
       break;
     }
     case 'devices': {
@@ -210,9 +252,10 @@ async function main() {
     }
     case 'logout': {
       const cfg = loadConfig();
-      if (cfg && cfg.auth === 'github' && cfg.deviceId) {
+      if (cfg && cfg.auth === 'github' && cfg.deviceId && cfg.token) {
         try { const ws = await admin(cfg); ws.send(JSON.stringify({ t: 'device_revoke', id: cfg.deviceId })); await nextMsg(ws, ['device_revoked'], 3000).catch(() => {}); ws.close(); } catch { /* relay unreachable: still log out locally */ }
       }
+      deleteSecret(cfg);
       fs.rmSync(configFile(), { force: true });
       console.log('Logged out.');
       break;
@@ -224,7 +267,9 @@ async function main() {
       const isInvite = cmd === 'invite';
       const chat = rest[0];
       if (!chat) die(isInvite ? 'usage: slopstream invite <chat-label> [--yes]   (that chat must already be linked)' : 'usage: slopstream pair-create <chat-label> [--yes]');
-      const ws = await admin(needCfg());
+      const pcfg = needCfg();
+      const ws = await admin(pcfg);
+      const viaBrowser = await browserConfirms(pcfg);
       ws.send(JSON.stringify({ t: isInvite ? 'invite_create' : 'pair_create', chat }));
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
@@ -237,9 +282,9 @@ async function main() {
       ws.on('close', stays);
       const req = await nextMsg(ws, ['pair_request'], 0, mine);
       console.log(`\n${req.from.user}${req.from.github ? ` (github.com/${req.from.github})` : ''} wants to ${isInvite ? `join "${chat}"` : `link their chat "${req.from.chat}" to your chat "${chat}"`}${isInvite ? ` (their chat label: "${req.from.chat}")` : ''}.`);
-      const ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+      const ok = viaBrowser || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       ws.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok }));
-      const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, mine);
+      const r = await waitConfirming(ws, pcfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${req.code}`);
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
       ws.off('close', stays); process.off('SIGINT', stays);
       ws.close(); break;
@@ -247,9 +292,10 @@ async function main() {
     case 'pair-accept': {
       requireHuman(cmd);
       const [code, chat] = rest; if (!code || !chat) die('usage: slopstream pair-accept <code> <chat-label>');
-      const ws = await admin(needCfg());
+      const acfg = needCfg();
+      const ws = await admin(acfg);
       ws.send(JSON.stringify({ t: 'pair_accept', code, chat }));
-      const w = await nextMsg(ws, ['pair_waiting']);
+      const w = await waitConfirming(ws, acfg, ['pair_waiting'], (m) => normCode(m.code) === normCode(code), `Run the same command again: slopstream pair-accept ${code} ${chat}`, 8000);
       console.log(`${w.message.charAt(0).toUpperCase()}${w.message.slice(1)}. You can close this; once approved the link appears in: slopstream links`);
       const r = await nextMsg(ws, ['paired', 'pair_denied'], 0, (m) => normCode(m.code) === normCode(code));
       console.log(r.t === 'paired' ? `Linked: ${chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied by the other side.');
@@ -258,8 +304,13 @@ async function main() {
     case 'requests': {
       const ws = await admin(needCfg());
       ws.send(JSON.stringify({ t: 'list_requests' }));
-      const { invites } = await nextMsg(ws, ['requests'], 5000);
-      if (!invites.length) console.log('No open invites.');
+      const { invites, incoming = [] } = await nextMsg(ws, ['requests'], 5000);
+      if (incoming.length) {
+        console.log('Invites for you:');
+        for (const v of incoming) console.log(`  ${v.code}  from @${v.from.user}${v.from.github ? ` (github.com/${v.from.github})` : ''}, chat "${v.chat}"  expires ${new Date(v.expiresAt).toLocaleString()}\n    → slopstream join ${v.code}`);
+        console.log('');
+      }
+      if (!invites.length) console.log(incoming.length ? 'No invites of yours are open.' : 'No open invites.');
       for (const v of invites) {
         const r = v.requester;
         console.log(`${v.code}  ${v.kind}  chat "${v.chat}"  expires ${new Date(v.expiresAt).toLocaleString()}  ` +
@@ -271,7 +322,8 @@ async function main() {
     case 'deny': {
       if (cmd === 'approve') requireHuman(cmd);
       const code = rest[0]; if (!code) die(`usage: slopstream ${cmd} <code>${cmd === 'approve' ? ' [--yes]' : ''}`);
-      const ws = await admin(needCfg());
+      const apcfg = needCfg();
+      const ws = await admin(apcfg);
       ws.send(JSON.stringify({ t: 'list_requests' }));
       const { invites } = await nextMsg(ws, ['requests'], 5000);
       const v = invites.find(x => normCode(x.code) === normCode(code));
@@ -280,10 +332,10 @@ async function main() {
       if (cmd === 'approve') {
         const r = v.requester;
         console.log(`${r.user}${r.github ? ` (github.com/${r.github})` : ''} wants to link their chat "${r.chat}" with your chat "${v.chat}".`);
-        ok = yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
+        ok = (await browserConfirms(apcfg)) || yes || /^y(es)?$/i.test((await ask('Approve? [y/N] ')).trim());
       }
       const mine = (m) => normCode(m.code) === normCode(v.code);
-      const done = nextMsg(ws, ['paired', 'pair_denied'], 5000, mine);
+      const done = waitConfirming(ws, apcfg, ['paired', 'pair_denied'], mine, `Run: slopstream approve ${v.code}`, cmd === 'approve' ? 0 : 5000);
       ws.send(JSON.stringify({ t: 'pair_decision', code: v.code, ok }));
       const r = await done;
       console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
@@ -333,7 +385,7 @@ async function main() {
     }
     case 'init': {
       const chat = rest[0]; if (!chat) die('usage: slopstream init <chat-label> [--agent claude|codex]   (run inside the project folder)');
-      const r = runInit({ chat, agent: opt('agent') || 'claude', cwd: process.cwd(), home: opt('home') });
+      const r = runInit({ chat, agent: await pickAgent(), cwd: process.cwd(), home: opt('home') });
       console.log(`Set up ${r.agent} in ${process.cwd()}: wrote ${r.written.join(' and ')}`);
       for (const w of r.warnings || []) console.log(`WARNING: ${w}`);
       if (r.agent === 'claude') console.log('Start the linked session with:\n  claude --dangerously-load-development-channels server:slopstream');
@@ -381,6 +433,7 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       break;
     }
     case 'status': process.exitCode = await runStatus(); break;
+    case 'doctor': process.exitCode = await runDoctor({ chat: opt('chat'), json: args.includes('--json') }); break;
     case 'simulate': {
       const chat = opt('chat'); if (!chat) die('usage: slopstream simulate --chat <chat-label> [--agent claude|codex]');
       if (opt('home')) process.env.SLOPSTREAM_HOME = path.resolve(opt('home'));
@@ -400,7 +453,8 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       console.log(`slopstream: your agent can ask mine.
 
 usage: slopstream <command>
-  link [chat] [--agent claude|codex] [--add]   make an invite link for this folder and wait for your teammate
+  link [@user] [chat] [--agent ..] [--add]   make an invite link for this folder and wait for your teammate
+                                      (with @user, only that person can use it)
   join <code-or-link> [chat]         link this folder to a teammate's invite
   login [--relay <url>]              log in with GitHub (once per machine)
   whoami                             show who you are logged in as and check it works
@@ -426,8 +480,10 @@ usage: slopstream <command>
                                       relay/server.js process on this machine.
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
+  doctor [--chat <label>] [--json]   check every step (login, relay, this folder, link) and print the fix for each problem
   demo up|status|peer|down           test everything on THIS machine alone (see docs/testing.md)
   simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
   }
 }
-main().then(() => process.exit(process.exitCode || 0)).catch((e) => die(`error: ${e.message}`));
+const quiet = cmd === 'codex-hook' || cmd === 'simulate' || (cmd === 'demo' && rest[0] === 'peer');
+main().then(() => (quiet ? null : maybeNotifyUpdate())).then(() => process.exit(process.exitCode || 0)).catch((e) => die(e instanceof RelayError ? explain(e.code, e.message) : `error: ${e.message}`));

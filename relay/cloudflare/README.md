@@ -21,6 +21,15 @@ Then, from the repo root, in another terminal (starts a fake GitHub on 18795, wh
 RELAY_URL=ws://127.0.0.1:18800 node test/login.js
 ```
 
+To also run the browser-confirmation tests, start the worker with the confirmation settings and point the fake GitHub at its port:
+
+```
+npm run dev -- --var GITHUB_CLIENT_SECRET:test-secret --var CONFIRM_TTL_MS:7000
+GH_PORT=18795 RELAY_URL=ws://127.0.0.1:18800 node test/confirm.js     # from the repo root
+```
+
+(Leave the secret out for `test/login.js`: with it set, `link` and `join` wait for a browser click.)
+
 Local state lives in `.wrangler/`; delete it to start fresh.
 
 ## Deploy

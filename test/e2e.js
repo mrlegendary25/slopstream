@@ -1,4 +1,5 @@
 // End-to-end test: real relay + real CLI pairing + two real bridge processes over MCP stdio.
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -93,6 +94,8 @@ check('meta.from is the sender', got?.meta?.from === 'himnish');
 check('content is framed as UNTRUSTED', /UNTRUSTED message from himnish/.test(got?.content || ''));
 check('wrapper-forging characters neutralised', !/<\/channel>|<channel/.test(got?.content || ''), got?.content);
 const thread = got?.meta?.thread_id;
+const shownSeen = await waitFor(async () => JSON.parse((await H.call('link_status')).text).recentReceipts.find(x => x.status === 'shown' && x.to === 'aarush'));
+check('claude receiver sends shown after the channel push', !!shownSeen && shownSeen.id === got?.meta?.msg_id, JSON.stringify(shownSeen));
 
 // 6. reply keeps the thread
 r = await A.call('send_message', { text: 'ack, thinking', thread_id: thread });
@@ -150,7 +153,7 @@ check('wrong token cannot impersonate', imp.some(m => m.code === 'auth'));
 await sleep(300);
 let used = 3, limited = null;
 for (let i = 0; i < 10; i++) { const x = await H.call('send_message', { text: 'm' + i }); if (!x.err) used++; else { limited = x.text; break; } }
-check('rate limit kicks in at 6 messages/window', used === 6 && /rate_limited/.test(limited || ''), `${used} ${limited}`);
+check('rate limit kicks in at 6 messages/window', used === 6 && /too fast/.test(limited || ''), `${used} ${limited}`);
 
 // 9b. pause: a local-only switch that stops a chat connecting, without touching the link itself
 await H.client.close();
@@ -172,6 +175,8 @@ check('unlink disconnects the peer immediately', !after.connectedToRelay && /unl
 
 // 11. audit log exists and has the messages
 const audit = fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8');
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version;
+check('bridge reports its package version to the relay', audit.includes(`"clientVersion":"${pkgVersion}"`), audit.slice(0, 300));
 check('relay audit log recorded messages + offline attempt', /"ev":"msg"/.test(audit) && /undelivered_offline/.test(audit));
 
 await H.client.close(); await A.client.close(); relay.kill();

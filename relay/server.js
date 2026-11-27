@@ -18,7 +18,7 @@ const config = configFromEnv(process.env);
 if (!config.publicUrl) config.publicUrl = `http://${HOST}:${PORT}`;
 const MAX_GROUP_SIZE = config.maxGroupSize;
 
-const core = new RelayCore({ kv: new FileKV(DATA), config });
+const core = new RelayCore({ kv: new FileKV(DATA, { auditMaxBytes: Number(process.env.AUDIT_MAX_BYTES) || undefined, auditRetentionDays: Number(process.env.AUDIT_RETENTION_DAYS) || undefined }), config });
 
 const MAX_BODY = 4096;
 const server = http.createServer((req, res) => {
@@ -32,7 +32,7 @@ const server = http.createServer((req, res) => {
     if (tooBig) { res.writeHead(413, { 'content-type': 'text/plain' }); return res.end('payload too large'); }
     try {
       const url = new URL(req.url, 'http://x');
-      const out = await core.handleHttp({ method: req.method, path: url.pathname, body: Buffer.concat(chunks).toString('utf8'), ip: req.socket.remoteAddress });
+      const out = await core.handleHttp({ method: req.method, path: url.pathname, query: url.search.slice(1), headers: req.headers, body: Buffer.concat(chunks).toString('utf8'), ip: req.socket.remoteAddress });
       res.writeHead(out.status, out.headers || {});
       res.end(out.body);
     } catch (e) {
@@ -68,7 +68,7 @@ setInterval(() => {
 }, 15000).unref();
 setInterval(() => core.sweep(), 5000).unref();
 
-// Pidfile, so `slopstream stop` can find this process on any OS. The old lookup shelled out to
+// Pidfile, so `force-stop-clean` can find this process on any OS. The old lookup shelled out to
 // `pgrep`, which only exists on Unix. Written to the data dir and to a fixed path in the home
 // directory, because the CLI does not always know which DATA_DIR the relay was started with.
 const PIDFILES = [path.join(DATA, 'relay.pid'), path.join(os.homedir(), '.slopstream-relay.pid')];

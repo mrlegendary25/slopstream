@@ -8,23 +8,34 @@
 // periodic sweep(). No ws, no fs, no timers in here, so the same code runs in both places.
 // Wire format is A2A-shaped (contextId + parts[]) but this is NOT full A2A yet.
 
+import { migrate } from './migrations.js';
 import crypto from 'node:crypto';
-import { invitePage, gonePage, landingPage } from './html.js';
+import { invitePage, gonePage, landingPage, confirmPage, messagePage } from './html.js';
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
 const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
+const RECEIPT_STATUSES = ['accepted', 'declined', 'shown', 'inbox', 'read'];
+const CONFIRM_MAX_OPEN = 5;
+const MAX_DIRECTED_PER_DAY = 20;
+const SESSION_MS = 15 * 60 * 1000;
 const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ACCEPT_FAIL_MAX = 10;
 const ACCEPT_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,40}$/;
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const json = (status, obj) => ({ status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, body: JSON.stringify(obj) });
-const html = (status, body) => ({ status, body, headers: {
+const html = (status, body, strict) => ({ status, body, headers: {
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https://avatars.githubusercontent.com" } });
+  'content-security-policy': strict ? strict.csp : "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https://avatars.githubusercontent.com",
+  ...(strict ? { 'x-frame-options': 'DENY' } : {}) } });
+// Pages where a click changes something: nothing but styles, and never framed.
+const STRICT = { csp: "default-src 'none'; style-src 'unsafe-inline'; img-src https://avatars.githubusercontent.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" };
 const key = (user, chat) => `${user} ${chat}`;
+// numeric major.minor.patch compare; a missing or invalid version counts as 0.0.0. (The relay must not import from bridge/.)
+const verParts = (v) => { const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0]; };
+const verLess = (a, b) => { const x = verParts(a), y = verParts(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; };
 const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const displayCode = (c) => c.slice(0, 5) + '-' + c.slice(5);
 
@@ -46,7 +57,33 @@ export function configFromEnv(env) {
     maxOpenInvites: num(env.MAX_OPEN_INVITES, 20),
     maxDevices: num(env.MAX_DEVICES, 20),
     maxLinks: num(env.MAX_LINKS, 50),
+    minClientVersion: str(env.MIN_CLIENT_VERSION, ''),
+    statsToken: str(env.STATS_TOKEN, ''),
+    githubClientSecret: str(env.GITHUB_CLIENT_SECRET, ''),
+    confirmLinks: str(env.CONFIRM_LINKS, 'auto'), // auto: on when GitHub login is fully configured; on: required; off: never
+    confirmTtlMs: num(env.CONFIRM_TTL_MS, 10 * 60 * 1000),
   };
+}
+
+// ---- Privacy-safe daily counters (D6). Counts only: never a user name, a chat label, a link id or any message content. ----
+const STAT_FIELDS = ['logins', 'accounts', 'invites', 'links', 'msgs', 'undelivered', 'activated'];
+const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+// Weekly active links (WAL) = distinct links with at least one delivered message in the last 7 days.
+// The per-day `active` arrays hold link ids inside the store, but the report only ever carries their counts.
+export function statsReport(kv, now = Date.now()) {
+  const days = kv.list('stats:').map(([k, v]) => [k.slice('stats:'.length), v]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const weekFrom = dayOf(now - 6 * 86400000);
+  const wal = new Set();
+  const act = { accounts: 0, activated: 0 };
+  const out = days.map(([date, v]) => {
+    if (date >= weekFrom) { for (const id of v.active || []) wal.add(id); act.accounts += v.accounts || 0; act.activated += v.activated || 0; }
+    const row = { date };
+    for (const f of STAT_FIELDS) row[f] = v[f] || 0;
+    row.activeLinks = (v.active || []).length;
+    return row;
+  });
+  return { days: out, wal: wal.size, activation7d: act };
 }
 
 export class RelayCore {
@@ -57,6 +94,8 @@ export class RelayCore {
     this.now = now;
     // A "link" is a group of 2..maxGroupSize chats that have all agreed to be reachable from one another.
     // { id, members: [{user, chat}, ...], createdAt }
+    if (config.confirmLinks === 'on' && !(config.githubClientId && config.githubClientSecret)) throw new Error('CONFIRM_LINKS=on needs GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET');
+    migrate(kv); // before anything reads stored state
     this.links = kv.get('links') || [];
     this.conns = new Map();   // conn id -> conn
     this.online = new Map();  // "user chat" -> conn id (session connections only)
@@ -120,6 +159,17 @@ export class RelayCore {
     }
     for (const [k, inv] of this.kv.list('invite:')) if (inv.exp < now) this.kv.del(k);
     for (const [k, d] of this.kv.list('devauth:')) if (d.exp < now) this.kv.del(k);
+    for (const [k, o] of this.kv.list('oauth:')) if (o.exp < now) this.kv.del(k);
+    const statsKeep = dayOf(now - 90 * 86400000);
+    for (const [k] of this.kv.list('stats:')) if (k.slice('stats:'.length) < statsKeep) this.kv.del(k);
+    const keepFrom = new Date(now - 2 * 86400000).toISOString().slice(0, 10); // daily directed-invite counters live two days
+    for (const [k] of this.kv.list('dirinv:')) if (k.split(':').pop() < keepFrom) this.kv.del(k);
+    for (const [k, cf] of this.kv.list('confirm:')) {
+      if (cf.exp >= now) continue;
+      this.kv.del(k);
+      this.audit({ ev: 'confirm_expired', user: cf.user });
+      for (const c of this.adminConnsOf(cf.user)) c.send({ t: 'confirm_expired', id: cf.id, code: displayCode(cf.action.code) });
+    }
     for (const [ip, arr] of this.authFails) {
       const fresh = arr.filter(t => now - t < AUTH_FAIL_WINDOW_MS);
       if (fresh.length) this.authFails.set(ip, fresh); else this.authFails.delete(ip);
@@ -135,27 +185,30 @@ export class RelayCore {
   }
 
   // True while there is state a sweep must eventually clean up (the Durable Object keeps its alarm running for it).
-  hasPendingState() { return this.kv.list('invite:').length > 0 || this.kv.list('devauth:').length > 0; }
+  hasPendingState() { return ['invite:', 'devauth:', 'confirm:', 'oauth:'].some(p => this.kv.list(p).length > 0); }
 
   async handleHttp(req) {
     const { method, path } = req;
     if (method === 'GET' && path === '/healthz') return json(200, { ok: true, protocol: PROTOCOL });
     if (method === 'GET' && path === '/v1/info') {
       const c = this.config;
-      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, publicUrl: c.publicUrl, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
+      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, confirmLinks: this.confirmEnabled(), publicUrl: c.publicUrl, minClientVersion: c.minClientVersion, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
     }
     if (method === 'GET' && path.startsWith('/v1/invite/')) {
       const inv = this.getInvite(decodeURIComponent(path.slice('/v1/invite/'.length)));
       if (!inv) return json(404, { status: 'not_found' });
       if (inv.requester) return json(200, { status: 'used' });
-      return json(200, { status: 'open', inviter: inv.user, inviterGithub: this.githubOf(inv.user), chat: inv.chat, kind: inv.kind, expiresAt: inv.exp });
+      return json(200, { status: 'open', inviter: inv.user, inviterGithub: this.githubOf(inv.user), chat: inv.chat, kind: inv.kind, expiresAt: inv.exp, ...(inv.forUser ? { for: inv.forUser } : {}) });
     }
     if (method === 'GET' && path.startsWith('/j/')) {
       let inv; try { inv = this.getInvite(decodeURIComponent(path.slice(3))); } catch { inv = undefined; }
       if (!inv || inv.requester) return html(404, gonePage());
-      return html(200, invitePage({ inviter: inv.user, inviterGithub: this.githubOf(inv.user), code: displayCode(inv.code), expiresAt: inv.exp }));
+      return html(200, invitePage({ inviter: inv.user, inviterGithub: this.githubOf(inv.user), code: displayCode(inv.code), expiresAt: inv.exp, forUser: inv.forUser || null }));
     }
     if (method === 'GET' && path === '/') return html(200, landingPage());
+    if (path.startsWith('/c/') && (method === 'GET' || method === 'POST')) return this.confirmPageRoute(req);
+    if (method === 'GET' && path === '/v1/auth/github/callback') return this.githubCallback(req);
+    if (method === 'GET' && path === '/v1/stats') return this.statsRoute(req);
     if (method === 'POST' && (path === '/v1/auth/github/start' || path === '/v1/auth/github/poll')) {
       let body = {};
       try { body = req.body ? JSON.parse(req.body) : {}; } catch { return json(400, { status: 'error', code: 'bad_json' }); }
@@ -240,6 +293,7 @@ export class RelayCore {
       }
       this.kv.put('account:' + name, { name, ghId: who.id, ghLogin: who.login, createdAt: now });
       this.kv.put('gh:' + who.id, name);
+      this.bump('accounts');
     } else {
       // The relay username never changes after creation (links reference it), even if the person renames on GitHub.
       const acc = this.kv.get('account:' + name);
@@ -254,8 +308,182 @@ export class RelayCore {
     const deviceId = crypto.randomUUID();
     this.kv.put('device:' + hashToken(token), { id: deviceId, user: name, label: d.label, createdAt: now, lastSeenAt: now });
     this.kv.del(key);
+    this.bump('logins');
     this.audit({ ev: 'login', user: name, deviceId });
     return json(200, { status: 'ok', user: name, token, device_id: deviceId });
+  }
+
+  // ---- Browser confirmation: a token alone must not be able to make a chat reachable by someone new. ----
+  // The two actions that do that (pair_accept, pair_decision ok) are parked until the person clicks Approve in
+  // THEIR browser, signed in to GitHub as themselves. A shell can read a token; it can't produce that session or that click.
+  confirmEnabled() {
+    const c = this.config;
+    if (c.confirmLinks === 'off') return false;
+    if (c.confirmLinks === 'on') return true;
+    return !!(c.githubClientId && c.githubClientSecret);
+  }
+  // Applies to GitHub accounts only. Legacy admin-token users have no second identity to confirm with.
+  needsConfirm(user) { return this.confirmEnabled() && !!this.kv.get('account:' + user); }
+
+  parkConfirm(conn, action) {
+    const user = conn.meta.user;
+    const now = this.now();
+    const open = this.kv.list('confirm:').filter(([, cf]) => cf.user === user && cf.exp >= now);
+    if (open.length >= CONFIRM_MAX_OPEN) return conn.send({ t: 'error', code: 'too_many_confirms', message: 'you have too many requests waiting for approval in your browser' });
+    const acc = this.kv.get('account:' + user);
+    const id = crypto.randomBytes(24).toString('base64url');
+    this.kv.put('confirm:' + id, { id, user, ghId: acc.ghId, action, csrf: crypto.randomBytes(24).toString('base64url'), createdAt: now, exp: now + this.config.confirmTtlMs });
+    this.audit({ ev: 'confirm_required', user, action: action.t });
+    conn.send({ t: 'confirm_required', id, url: `${this.config.publicUrl}/c/${id}`, action: action.t === 'accept' ? 'accept' : 'approve', code: displayCode(normCode(action.code)), expiresInSec: this.config.confirmTtlMs / 1000 });
+  }
+
+  getConfirm(id) {
+    const cf = id ? this.kv.get('confirm:' + id) : undefined;
+    if (!cf) return undefined;
+    if (cf.exp < this.now()) return undefined; // sweep() sends the expiry notice and deletes it
+    return cf;
+  }
+
+  webSecret() {
+    let k = this.kv.get('websecret');
+    if (!k) { k = crypto.randomBytes(32).toString('base64url'); this.kv.put('websecret', k); }
+    return k;
+  }
+  signSession(payload) {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return `${body}.${crypto.createHmac('sha256', this.webSecret()).update(body).digest('base64url')}`;
+  }
+  readSession(cookieHeader) {
+    const m = /(?:^|;\s*)ss_web=([A-Za-z0-9_.-]+)/.exec(cookieHeader || '');
+    if (!m) return null;
+    const [body, mac] = m[1].split('.');
+    if (!body || !mac) return null;
+    const want = crypto.createHmac('sha256', this.webSecret()).update(body).digest('base64url');
+    if (mac.length !== want.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(want))) return null;
+    try {
+      const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+      return p && p.exp > this.now() ? p : null;
+    } catch { return null; }
+  }
+
+  async confirmPageRoute(req) {
+    let id = ''; try { id = decodeURIComponent(req.path.slice(3)); } catch { /* not a valid id */ }
+    const cf = this.getConfirm(id);
+    if (!cf) return html(404, gonePage({ what: 'request' }), STRICT);
+    const sess = this.readSession((req.headers || {}).cookie);
+    const mine = sess && sess.u === cf.user && sess.gh === cf.ghId;
+
+    if (req.method === 'GET') {
+      if (!mine) {
+        const c = this.config;
+        const state = crypto.randomBytes(24).toString('base64url');
+        this.kv.put('oauth:' + state, { confirmId: id, exp: this.now() + 10 * 60 * 1000 });
+        const q = new URLSearchParams({ client_id: c.githubClientId, redirect_uri: `${c.publicUrl}/v1/auth/github/callback`, state, allow_signup: 'false' });
+        return { status: 302, headers: { location: `${c.githubBaseUrl}/login/oauth/authorize?${q}`, 'cache-control': 'no-store' }, body: '' };
+      }
+      const view = this.confirmView(cf);
+      if (!view) return html(410, messagePage('Request no longer valid', 'That invite is gone or was already used. Nothing was changed.'), STRICT);
+      return html(200, confirmPage({ ...view, id, csrf: cf.csrf }), STRICT);
+    }
+
+    // POST: needs the signed-in browser session AND the page's own csrf token. Anything else leaves the request pending.
+    const forbidden = () => html(403, messagePage('Not allowed', 'This request could not be verified. Nothing was changed. Open the link from your terminal again.'), STRICT);
+    const origin = (req.headers || {}).origin;
+    if (origin && this.config.publicUrl && origin !== new URL(this.config.publicUrl).origin) return forbidden();
+    if (!mine) return forbidden();
+    const form = new URLSearchParams(req.body || '');
+    const given = Buffer.from(String(form.get('csrf') || '')), want = Buffer.from(cf.csrf);
+    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return forbidden();
+    const decision = form.get('decision');
+    if (decision !== 'approve' && decision !== 'deny') return forbidden();
+
+    this.kv.del('confirm:' + id); // single use
+    const a = cf.action;
+    const toUser = (o) => { for (const c of this.adminConnsOf(cf.user)) c.send(o); };
+    const dcode = displayCode(normCode(a.code));
+    if (decision === 'deny') {
+      this.audit({ ev: 'confirm_denied', user: cf.user, action: a.t });
+      if (a.t === 'accept') toUser({ t: 'confirm_declined', id, code: dcode });
+      else this.doDecision(cf.user, a.code, false, toUser);
+      return html(200, messagePage('Denied', 'Nothing was linked. You can close this tab.'), STRICT);
+    }
+    this.audit({ ev: 'confirm_ok', user: cf.user, action: a.t });
+    const r = a.t === 'accept' ? this.doAccept(cf.user, a.code, a.chat, toUser) : this.doDecision(cf.user, a.code, true, toUser);
+    if (r && r.code) return html(200, messagePage('Could not link', `${r.message}. Nothing was changed.`), STRICT);
+    return html(200, messagePage('Done', 'You can close this tab and go back to your terminal.'), STRICT);
+  }
+
+  // What the confirm page shows, from the live invite (the state may have changed while the request was parked).
+  confirmView(cf) {
+    const inv = this.getInvite(cf.action.code);
+    if (!inv) return null;
+    if (cf.action.t === 'accept') {
+      if (inv.requester || inv.user === cf.user) return null;
+      return { action: 'accept', other: { user: inv.user, github: this.githubOf(inv.user) }, theirChat: inv.chat, myChat: cf.action.chat };
+    }
+    if (inv.user !== cf.user || !inv.requester) return null;
+    return { action: 'approve', other: { user: inv.requester.user, github: this.githubOf(inv.requester.user) }, theirChat: inv.requester.chat, myChat: inv.chat };
+  }
+
+  // Off unless STATS_TOKEN is set. A wrong token counts against the same per-IP limiter as a wrong login.
+  statsRoute(req) {
+    const want = this.config.statsToken;
+    if (!want) return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
+    const now = this.now();
+    const ip = req.ip || '';
+    const fails = (this.authFails.get(ip) || []).filter(t => now - t < AUTH_FAIL_WINDOW_MS);
+    this.authFails.set(ip, fails);
+    if (ip && fails.length >= AUTH_FAIL_MAX) return json(429, { status: 'error', code: 'rate_limited' });
+    const given = /^Bearer (.+)$/.exec((req.headers || {}).authorization || '')?.[1] || '';
+    const a = crypto.createHash('sha256').update(given).digest(), b = crypto.createHash('sha256').update(want).digest();
+    if (!crypto.timingSafeEqual(a, b)) { fails.push(now); return json(401, { status: 'error', code: 'auth' }); }
+    return json(200, statsReport(this.kv, now));
+  }
+
+  async githubCallback(req) {
+    const c = this.config;
+    const q = new URLSearchParams(req.query || '');
+    const st = String(q.get('state') || '');
+    const o = st ? this.kv.get('oauth:' + st) : undefined;
+    if (o) this.kv.del('oauth:' + st); // single use
+    if (!o || o.exp < this.now()) return html(400, messagePage('Link expired', 'Open the link from your terminal again.'), STRICT);
+    const cf = this.getConfirm(o.confirmId);
+    if (!cf) return html(404, gonePage({ what: 'request' }), STRICT);
+    let who = null;
+    try {
+      const tok = await this.ghForm(`${c.githubBaseUrl}/login/oauth/access_token`, {
+        client_id: c.githubClientId, client_secret: c.githubClientSecret, code: String(q.get('code') || ''), redirect_uri: `${c.publicUrl}/v1/auth/github/callback` });
+      if (tok && tok.access_token) {
+        // Used once, right here, to learn who is at the keyboard. Never stored or logged.
+        const r = await this.fetch(`${c.githubApiUrl}/user`, {
+          headers: { authorization: `Bearer ${tok.access_token}`, accept: 'application/vnd.github+json', 'user-agent': 'slopstream-relay', 'x-github-api-version': '2022-11-28' },
+          signal: AbortSignal.timeout(10000),
+        });
+        who = r.ok ? await r.json() : null;
+      }
+    } catch { who = null; }
+    if (!who || typeof who.id !== 'number') return html(502, messagePage('GitHub is not answering', 'Try again in a minute: open the link from your terminal again.'), STRICT);
+    if (who.id !== cf.ghId) {
+      this.audit({ ev: 'confirm_wrong_account', user: cf.user });
+      const expected = this.githubOf(cf.user) || cf.user;
+      return html(403, messagePage('Wrong GitHub account', `You're signed in to GitHub as @${who.login}, but this request is for @${expected}. Nothing was changed.`), STRICT);
+    }
+    const exp = this.now() + SESSION_MS;
+    const cookie = [`ss_web=${this.signSession({ u: cf.user, gh: cf.ghId, exp })}`, 'HttpOnly', 'SameSite=Lax', 'Path=/', `Max-Age=${SESSION_MS / 1000}`, ...(c.publicUrl.startsWith('https:') ? ['Secure'] : [])].join('; ');
+    return { status: 302, headers: { location: `/c/${o.confirmId}`, 'set-cookie': cookie, 'cache-control': 'no-store' }, body: '' };
+  }
+
+  bump(field, n = 1) {
+    const k = 'stats:' + dayOf(this.now());
+    const d = this.kv.get(k) || {};
+    d[field] = (d[field] || 0) + n;
+    this.kv.put(k, d);
+  }
+  markActive(linkId) {
+    const k = 'stats:' + dayOf(this.now());
+    const d = this.kv.get(k) || {};
+    d.active = d.active || [];
+    if (!d.active.includes(linkId)) { d.active.push(linkId); this.kv.put(k, d); }
   }
 
   // ---- helpers ----
@@ -279,14 +507,30 @@ export class RelayCore {
   userInvites(user) { return this.kv.list('invite:').map(([, v]) => v).filter(v => v.user === user && v.exp >= this.now()); }
   adminConnsOf(user) { return [...this.conns.values()].filter(c => c.meta.authed && c.meta.mode === 'admin' && c.meta.user === user); }
   githubOf(user) { return this.kv.get('account:' + user)?.ghLogin || null; }
-  makeInvite(conn, chat, groupId) {
+  // `forUser` makes a directed invite (only that person can use it). D7: the relay never says whether that user exists.
+  makeInvite(conn, chat, groupId, forUser = null) {
     const user = conn.meta.user;
     const { maxOpenInvites, inviteTtlMs, publicUrl } = this.config;
     if (this.userInvites(user).length >= maxOpenInvites) { conn.send({ t: 'error', code: 'too_many_invites', message: `you already have ${maxOpenInvites} open invites; cancel some first` }); return; }
+    let dayKey = null;
+    if (forUser) {
+      dayKey = `dirinv:${user}:${new Date(this.now()).toISOString().slice(0, 10)}`;
+      if ((this.kv.get(dayKey) || 0) >= MAX_DIRECTED_PER_DAY) { conn.send({ t: 'error', code: 'too_many_directed', message: `you can send at most ${MAX_DIRECTED_PER_DAY} invites to named people per day` }); return; }
+    }
     const code = this.newCode();
     const createdAt = this.now();
-    this.kv.put('invite:' + code, { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null });
-    conn.send({ t: 'pair_code', code: displayCode(code), url: `${publicUrl}/j/${displayCode(code)}`, expiresInSec: inviteTtlMs / 1000 });
+    const inv = { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null, ...(forUser ? { forUser } : {}) };
+    this.kv.put('invite:' + code, inv);
+    if (dayKey) this.kv.put(dayKey, (this.kv.get(dayKey) || 0) + 1);
+    this.bump('invites');
+    const url = `${publicUrl}/j/${displayCode(code)}`;
+    conn.send({ t: 'pair_code', code: displayCode(code), url, expiresInSec: inviteTtlMs / 1000 });
+    // If the named person has a terminal open, they see it at once. Same reply to the sender either way.
+    if (forUser) for (const c of [...this.conns.values()]) if (c.meta.authed && c.meta.mode === 'admin' && c.meta.user.toLowerCase() === forUser) c.send(this.incomingOf(inv));
+    return inv;
+  }
+  incomingOf(inv) {
+    return { t: 'invite_for_you', code: displayCode(inv.code), url: `${this.config.publicUrl}/j/${displayCode(inv.code)}`, from: { user: inv.user, github: this.githubOf(inv.user) }, chat: inv.chat, expiresAt: inv.exp };
   }
   connOf(user, chat) { const id = this.online.get(key(user, chat)); return id ? this.conns.get(id) : undefined; }
   findLink(user, chat) { return this.links.find(l => l.members.some(m => m.user === user && m.chat === chat)); }
@@ -348,6 +592,12 @@ export class RelayCore {
     // Which kind of agent is behind this session (claude, codex, console...). Informational only.
     meta.agent = /^[a-z0-9_-]{1,20}$/.test(String(m.agent || '')) ? String(m.agent) : 'unknown';
     meta.v = Number(m.v) || 1;
+    meta.clientVersion = /^\d+\.\d+\.\d+/.test(String(m.clientVersion || '')) && String(m.clientVersion).length <= 20 ? String(m.clientVersion) : '0.0.0';
+    const minV = this.config.minClientVersion;
+    if (minV && verLess(meta.clientVersion, minV)) {
+      conn.send({ t: 'error', code: 'upgrade_required', message: `this relay needs slopstream ${minV} or newer`, minVersion: minV });
+      return conn.close(4010, 'upgrade required');
+    }
     const welcomeBase = { t: 'welcome', user: meta.user, protocol: PROTOCOL };
 
     if (!m.chat) { meta.mode = 'admin'; conn.saveMeta(); return conn.send({ ...welcomeBase, mode: 'admin' }); }
@@ -369,12 +619,97 @@ export class RelayCore {
     this.online.set(k, meta.id);
     conn.send({ ...welcomeBase, mode: 'session', link: { id: link.id }, members: this.otherMembers(link, user, chat) });
     this.broadcastMembers(link); // tell everyone else in the group this chat just came online
-    this.audit({ ev: 'online', user, chat, linkId: link.id });
+    this.audit({ ev: 'online', user, chat, linkId: link.id, clientVersion: meta.clientVersion });
   }
 
   handle(conn, m) {
     if (conn.meta.mode === 'admin') return this.handleAdmin(conn, m);
     if (conn.meta.mode === 'session') return this.handleSession(conn, m);
+  }
+
+  // null: not directed. false: invalid (or yourself). Otherwise the lower-cased username. Usernames are stored lower-case.
+  targetOf(conn, m) {
+    if (m.for === undefined || m.for === null || m.for === '') return null;
+    const t = String(m.for).replace(/^@/, '').toLowerCase();
+    if (!NAME_RE.test(t) || t === conn.meta.user.toLowerCase()) return false;
+    return t;
+  }
+
+  // ---- pairing steps. Called from the socket (no confirmation needed) and from the browser (after Approve). ----
+  // `send` is where replies go: the one connection that asked, or all of the person's admin connections.
+  // Returns { inv } when allowed, or { code, message } when not.
+  checkAccept(user, code, chat) {
+    const { maxGroupSize } = this.config;
+    const bad = (c, message) => ({ code: c, message });
+    if (!NAME_RE.test(chat)) return bad('bad_chat', 'invalid chat label');
+    // Brute-force limiter: codes are ~49 bits, but nobody gets unlimited guesses.
+    const now = this.now();
+    const fails = (this.acceptFails.get(user) || []).filter(t => now - t < ACCEPT_FAIL_WINDOW_MS);
+    this.acceptFails.set(user, fails);
+    if (fails.length >= ACCEPT_FAIL_MAX) return bad('too_many_attempts', 'too many wrong codes; try again in a few minutes');
+    const inv = this.getInvite(code);
+    if (!inv) { fails.push(now); return bad('bad_code', 'unknown or expired code'); }
+    if (inv.user === user) return bad('same_user', 'cannot pair with yourself');
+    if (inv.forUser && inv.forUser !== user.toLowerCase()) { fails.push(now); return bad('not_for_you', 'this invite is for someone else'); }
+    if (this.findLink(user, chat)) return bad('already_linked', `chat "${chat}" is already linked`);
+    if (inv.requester) return bad('busy', 'code already in use');
+    if (inv.groupId) {
+      const group = this.links.find(l => l.id === inv.groupId);
+      if (!group) return bad('gone', 'that group no longer exists');
+      if (group.members.length >= maxGroupSize) return bad('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
+      if (group.members.some(x => x.user === user)) return bad('already_in_group', 'you already have a chat in this group');
+    }
+    return { inv };
+  }
+  doAccept(user, code, chat, send) {
+    const r = this.checkAccept(user, code, chat);
+    if (r.code) { send({ t: 'error', code: r.code, message: r.message }); return r; }
+    const { inv } = r;
+    inv.requester = { user, chat, at: this.now() };
+    this.kv.put('invite:' + inv.code, inv);
+    const msg = { t: 'pair_request', code: displayCode(inv.code), from: { user, chat, github: this.githubOf(user) }, toChat: inv.chat };
+    for (const c of this.adminConnsOf(inv.user)) c.send(msg); // the inviter's human must approve
+    send({ t: 'pair_waiting', code: displayCode(inv.code), message: `waiting for ${inv.user} to approve` });
+    this.audit({ ev: 'pair_request', from: user, fromChat: chat, to: inv.user, toChat: inv.chat });
+    return {};
+  }
+  checkDecision(user, code) {
+    const inv = this.getInvite(code);
+    if (!inv || inv.user !== user || !inv.requester) return { code: 'bad_code', message: 'no such pending request' };
+    return { inv };
+  }
+  doDecision(user, code, ok, send) {
+    const { maxGroupSize } = this.config;
+    const r = this.checkDecision(user, code);
+    if (r.code) { send({ t: 'error', code: r.code, message: r.message }); return r; }
+    const { inv } = r;
+    this.kv.del('invite:' + inv.code); // single use, even when denied
+    const dcode = displayCode(inv.code);
+    const req = inv.requester;
+    const toBoth = (o) => { for (const c of [...this.adminConnsOf(inv.user), ...this.adminConnsOf(req.user)]) c.send(o); };
+    if (!ok) { toBoth({ t: 'pair_denied', code: dcode }); this.audit({ ev: 'pair_denied', user: inv.user }); return {}; }
+    const fail = (c, message) => { toBoth({ t: 'error', code: c, message }); return { code: c, message }; };
+
+    const countLinks = (u) => this.links.filter(l => l.members.some(x => x.user === u)).length;
+    const limited = inv.groupId ? [req.user] : [inv.user, req.user];
+    if (limited.some(u => countLinks(u) >= this.config.maxLinks)) return fail('too_many_links', 'a user is at the maximum number of links');
+    let link;
+    if (inv.groupId) {
+      link = this.links.find(l => l.id === inv.groupId);
+      if (!link) return fail('gone', 'that group no longer exists');
+      if (link.members.length >= maxGroupSize) return fail('group_full', 'group is now full');
+      link.members.push({ user: req.user, chat: req.chat });
+    } else {
+      link = { id: crypto.randomUUID(), members: [{ user: inv.user, chat: inv.chat }, { user: req.user, chat: req.chat }], createdAt: new Date(this.now()).toISOString() };
+      this.links.push(link);
+      this.bump('links');
+    }
+    this.saveLinks();
+    this.audit({ ev: inv.groupId ? 'member_added' : 'paired', linkId: link.id, by: user, added: { user: req.user, chat: req.chat } });
+    for (const c of this.adminConnsOf(inv.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, inv.user, inv.chat) });
+    for (const c of this.adminConnsOf(req.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, req.user, req.chat) });
+    this.broadcastMembers(link); // refresh anyone else already online in the group
+    return {};
   }
 
   handleAdmin(conn, m) {
@@ -386,8 +721,10 @@ export class RelayCore {
         const chat = String(m.chat || '');
         if (!NAME_RE.test(chat)) return err('bad_chat', 'invalid chat label');
         if (this.findLink(user, chat)) return err('already_linked', `chat "${chat}" is already linked`);
-        this.makeInvite(conn, chat, null);
-        return this.audit({ ev: 'pair_create', user, chat });
+        const forUser = this.targetOf(conn, m);
+        if (forUser === false) return err('bad_target', 'that is not a valid username');
+        if (!this.makeInvite(conn, chat, null, forUser)) return;
+        return this.audit({ ev: 'pair_create', user, chat, directed: !!forUser });
       }
       case 'invite_create': {
         // Add a NEW chat to a group that already has at least one link, up to maxGroupSize.
@@ -396,63 +733,31 @@ export class RelayCore {
         const link = this.findLink(user, chat);
         if (!link) return err('not_linked', `chat "${chat}" is not linked yet; use pair-create first`);
         if (link.members.length >= maxGroupSize) return err('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
-        this.makeInvite(conn, chat, link.id);
-        return this.audit({ ev: 'invite_create', user, chat, linkId: link.id });
+        const forUser = this.targetOf(conn, m);
+        if (forUser === false) return err('bad_target', 'that is not a valid username');
+        if (!this.makeInvite(conn, chat, link.id, forUser)) return;
+        return this.audit({ ev: 'invite_create', user, chat, linkId: link.id, directed: !!forUser });
       }
       case 'pair_accept': {
         const chat = String(m.chat || '');
-        if (!NAME_RE.test(chat)) return err('bad_chat', 'invalid chat label');
-        // Brute-force limiter: codes are ~49 bits, but nobody gets unlimited guesses.
-        const now = this.now();
-        const fails = (this.acceptFails.get(user) || []).filter(t => now - t < ACCEPT_FAIL_WINDOW_MS);
-        this.acceptFails.set(user, fails);
-        if (fails.length >= ACCEPT_FAIL_MAX) return err('too_many_attempts', 'too many wrong codes; try again in a few minutes');
-        const inv = this.getInvite(m.code);
-        if (!inv) { fails.push(now); return err('bad_code', 'unknown or expired code'); }
-        if (inv.user === user) return err('same_user', 'cannot pair with yourself');
-        if (this.findLink(user, chat)) return err('already_linked', `chat "${chat}" is already linked`);
-        if (inv.requester) return err('busy', 'code already in use');
-        if (inv.groupId) {
-          const group = this.links.find(l => l.id === inv.groupId);
-          if (!group) return err('gone', 'that group no longer exists');
-          if (group.members.length >= maxGroupSize) return err('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
-          if (group.members.some(x => x.user === user)) return err('already_in_group', 'you already have a chat in this group');
+        if (this.needsConfirm(user)) {
+          if (conn.meta.v < 3) return err('upgrade_required', 'update slopstream to link chats');
+          // Every existing check runs first, so a bad code fails here exactly as before; only a request that would succeed is parked.
+          const r = this.checkAccept(user, m.code, chat);
+          if (r.code) return err(r.code, r.message);
+          return this.parkConfirm(conn, { t: 'accept', code: r.inv.code, chat });
         }
-        inv.requester = { user, chat, at: now };
-        this.kv.put('invite:' + inv.code, inv);
-        const msg = { t: 'pair_request', code: displayCode(inv.code), from: { user, chat, github: this.githubOf(user) }, toChat: inv.chat };
-        for (const c of this.adminConnsOf(inv.user)) c.send(msg); // the inviter's human must approve
-        conn.send({ t: 'pair_waiting', code: displayCode(inv.code), message: `waiting for ${inv.user} to approve` });
-        this.audit({ ev: 'pair_request', from: user, fromChat: chat, to: inv.user, toChat: inv.chat });
+        this.doAccept(user, m.code, chat, (o) => conn.send(o));
         return;
       }
       case 'pair_decision': {
-        const inv = this.getInvite(m.code);
-        if (!inv || inv.user !== user || !inv.requester) return err('bad_code', 'no such pending request');
-        this.kv.del('invite:' + inv.code); // single use, even when denied
-        const dcode = displayCode(inv.code);
-        const req = inv.requester;
-        const toBoth = (o) => { for (const c of [...this.adminConnsOf(inv.user), ...this.adminConnsOf(req.user)]) c.send(o); };
-        if (!m.ok) { toBoth({ t: 'pair_denied', code: dcode }); this.audit({ ev: 'pair_denied', user: inv.user }); return; }
-
-        const countLinks = (u) => this.links.filter(l => l.members.some(x => x.user === u)).length;
-        const limited = inv.groupId ? [req.user] : [inv.user, req.user];
-        if (limited.some(u => countLinks(u) >= this.config.maxLinks)) return toBoth({ t: 'error', code: 'too_many_links', message: 'a user is at the maximum number of links' });
-        let link;
-        if (inv.groupId) {
-          link = this.links.find(l => l.id === inv.groupId);
-          if (!link) return toBoth({ t: 'error', code: 'gone', message: 'that group no longer exists' });
-          if (link.members.length >= maxGroupSize) return toBoth({ t: 'error', code: 'group_full', message: 'group is now full' });
-          link.members.push({ user: req.user, chat: req.chat });
-        } else {
-          link = { id: crypto.randomUUID(), members: [{ user: inv.user, chat: inv.chat }, { user: req.user, chat: req.chat }], createdAt: new Date(this.now()).toISOString() };
-          this.links.push(link);
+        if (m.ok && this.needsConfirm(user)) {
+          if (conn.meta.v < 3) return err('upgrade_required', 'update slopstream to link chats');
+          const r = this.checkDecision(user, m.code);
+          if (r.code) return err(r.code, r.message);
+          return this.parkConfirm(conn, { t: 'approve', code: r.inv.code, ok: true });
         }
-        this.saveLinks();
-        this.audit({ ev: inv.groupId ? 'member_added' : 'paired', linkId: link.id, by: user, added: { user: req.user, chat: req.chat } });
-        for (const c of this.adminConnsOf(inv.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, inv.user, inv.chat) });
-        for (const c of this.adminConnsOf(req.user)) c.send({ t: 'paired', code: dcode, link: { id: link.id }, members: this.otherMembers(link, req.user, req.chat) });
-        this.broadcastMembers(link); // refresh anyone else already online in the group
+        this.doDecision(user, m.code, !!m.ok, (o) => conn.send(o));
         return;
       }
       case 'device_list': {
@@ -476,7 +781,10 @@ export class RelayCore {
           code: displayCode(v.code), kind: v.kind, chat: v.chat, expiresAt: v.exp,
           requester: v.requester ? { user: v.requester.user, chat: v.requester.chat, github: this.githubOf(v.requester.user) } : null,
         }));
-        return conn.send({ t: 'requests', invites });
+        const incoming = this.kv.list('invite:').map(([, v]) => v)
+          .filter(v => v.forUser === user.toLowerCase() && !v.requester && v.exp >= this.now())
+          .map(v => { const { t, ...rest } = this.incomingOf(v); return rest; });
+        return conn.send({ t: 'requests', invites, incoming });
       }
       case 'invite_cancel': {
         const inv = this.getInvite(m.code);
@@ -518,16 +826,18 @@ export class RelayCore {
   handleSession(conn, m) {
     const { user, chat } = conn.meta;
     if (m.t === 'receipt') {
-      // Tells the ORIGINAL SENDER whether the receiving HUMAN let the message through ('accepted') or refused it ('declined').
+      // Tells the ORIGINAL SENDER what happened to their message: the receiving HUMAN let it through ('accepted') or refused it
+      // ('declined'), then where it went ('shown' in the chat, waiting in the 'inbox', or 'read' by the agent).
       // Fixed vocabulary only; never carries free text. `to` names the original sender (required once a group has >2 members).
       const rlink = this.findLink(user, chat);
-      if (!rlink || !['accepted', 'declined'].includes(m.status)) return;
+      if (!rlink || !RECEIPT_STATUSES.includes(m.status)) return;
       const others = this.otherMembers(rlink, user, chat);
       const target = m.to ? others.find(o => o.user === String(m.to)) : (others.length === 1 ? others[0] : null);
       if (!target) return;
       const rw = this.connOf(target.user, target.chat);
       this.audit({ ev: 'receipt', linkId: rlink.id, from: user, to: target.user, id: String(m.id || '').slice(0, 64), status: m.status });
-      if (rw) rw.send({ t: 'receipt', id: String(m.id || '').slice(0, 64), from: user, status: m.status });
+      // A 0.2.x bridge treats every status that is not 'accepted' as 'declined', so it only gets the two it knows.
+      if (rw && (rw.meta.v >= 3 || m.status === 'accepted' || m.status === 'declined')) rw.send({ t: 'receipt', id: String(m.id || '').slice(0, 64), from: user, status: m.status });
       return;
     }
     if (m.t !== 'msg') return;
@@ -546,10 +856,17 @@ export class RelayCore {
     if (!target) return nack(others.length > 1 ? 'ambiguous_target' : 'unknown_recipient');
 
     const pw = this.connOf(target.user, target.chat);
-    if (!pw) { this.audit({ ev: 'undelivered_offline', from: user, to: target.user, linkId: link.id }); return nack('peer_offline'); }
+    if (!pw) { this.bump('undelivered'); this.audit({ ev: 'undelivered_offline', from: user, to: target.user, linkId: link.id }); return nack('peer_offline'); }
     const out = { t: 'msg', id: m.id, from: user, fromChat: chat, fromAgent: conn.meta.agent, contextId: String(m.contextId || m.id), parts: [{ kind: 'text', text }] };
     pw.send(out);
     this.audit({ ev: 'msg', linkId: link.id, from: user, to: target.user, id: m.id, contextId: out.contextId, text });
     conn.send({ t: 'ack', id: m.id, delivered: true, to: target.user });
+    this.bump('msgs'); this.markActive(link.id);
+    // Activation: a GitHub account's first delivered message, sent within 24 h of signing up.
+    const acc = this.kv.get('account:' + user);
+    if (acc && !acc.firstMsgAt) {
+      acc.firstMsgAt = this.now(); this.kv.put('account:' + user, acc);
+      if (acc.firstMsgAt - acc.createdAt <= 86400000) this.bump('activated');
+    }
   }
 }

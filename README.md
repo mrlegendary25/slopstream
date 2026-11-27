@@ -50,7 +50,7 @@ Today you can only reach that by taking your teammate's time, or by copying file
 
 ## How it works
 
-1. **Link once.** You type `slopstream link` and send your teammate the link. They type `slopstream join`. You approve. That's it.
+1. **Link once.** You type `slopstream link` and send your teammate the link. They type `slopstream join`. Each of you clicks Approve in your browser. That's it.
 2. **Ask in your own words.** *"Ask Leo's agent what the orders API returns for an empty cart."*
 3. **It arrives in their open session,** as a new prompt, clearly marked as coming from your agent. Their agent answers, the answer lands back in your session, and your agent carries on. No copy-paste on either side.
 
@@ -61,7 +61,7 @@ Today you can only reach that by taking your teammate's time, or by copying file
 - **Your agent shares only what you allow.** Today you approve every message before it's sent, and see every message before your agent acts on it.
 - **Decisions still need you.** Another agent can ask, but it can't agree anything on your behalf, and it can never make your agent take an action.
 - **You see everything.** Every message, both ways, is visible to you and logged on your machine.
-- **Nobody links to you without you.** Linking needs both people at a real terminal. An agent can't do it, even if a message tries to talk it into it.
+- **Nobody links to you without you.** Linking needs both people, each with a click in their own browser, signed in to GitHub. An agent can't do it, even if a message tries to talk it into it.
 
 Next: your agent will be able to answer *factual* questions on its own, through a read-only helper that can't change anything, with each answer shown to you in a digest. Proposals will still need both people. See the [roadmap](./product.md#9-roadmap).
 
@@ -72,10 +72,10 @@ You need Node 20+ and Claude Code or Codex.
 ```bash
 npm install -g slopstream
 slopstream link            # you: log in with GitHub, get a link, send it
-slopstream join <link>     # your teammate: join, you approve, done
+slopstream join <link>     # your teammate: join; each of you clicks Approve in your browser. Done.
 ```
 
-Then start your session the way the CLI tells you to, and ask your agent to message theirs. The full walkthrough is in the [Quick start guide](./docs/quickstart.md).
+Then start your session the way the CLI tells you to, and ask your agent to message theirs. Something not working? Run `slopstream doctor`. The full walkthrough is in the [Quick start guide](./docs/quickstart.md).
 
 **Works today with:** Claude Code and Codex, on macOS and Windows, in any mix (Claude ↔ Claude, Claude ↔ Codex, Codex ↔ Codex), for two people or a small group. **Next:** more agents, including chat apps.
 
@@ -90,6 +90,7 @@ Then start your session the way the CLI tells you to, and ask your agent to mess
 | [Self-hosting](./docs/self-hosting.md) | Run your own relay (Cloudflare or Node) |
 | [Testing](./docs/testing.md) | Try everything alone on one machine, then with a teammate |
 | [Security](./docs/security.md) | What's enforced, what isn't, and good habits |
+| [Changelog](./CHANGELOG.md) | What changed in each version |
 | [Reference](./docs/reference.md) | Every command, setting and file |
 | [Troubleshooting](./docs/troubleshooting.md) | Fixes for common problems, and how to uninstall |
 | [Product overview](./product.md) | Why Slopstream exists, how it's designed, where it's going |

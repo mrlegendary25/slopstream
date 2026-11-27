@@ -1,18 +1,8 @@
 // `slopstream status`: is this machine ready? Checks Node, saved login, relay reachability,
 // your links and who is online right now, and which agents are installed.
-import { spawnSync } from 'node:child_process';
-import { loadConfig, configFile } from './config.js';
+import { loadConfig, configFile, defaultHome } from './config.js';
 import { admin, nextMsg } from './net.js';
-
-const ver = (cmd) => {
-  try {
-    const r = spawnSync(cmd, ['--version'], { encoding: 'utf8', timeout: 8000 });
-    if (r.error || r.status !== 0) return null;
-    const m = (r.stdout || r.stderr || '').match(/(\d+)\.(\d+)\.(\d+)/);
-    return m ? { text: m[0], parts: [+m[1], +m[2], +m[3]] } : { text: '(version unknown)', parts: null };
-  } catch { return null; }
-};
-const atLeast = (parts, min) => { if (!parts) return true; for (let i = 0; i < 3; i++) { if (parts[i] !== min[i]) return parts[i] > min[i]; } return true; };
+import { ver, atLeast, binFor, CLAUDE_MIN } from './agents.js';
 
 export async function runStatus() {
   const line = (ok, msg) => console.log(`  ${ok === true ? '✓' : ok === false ? '✗' : '-'} ${msg}`);
@@ -22,9 +12,10 @@ export async function runStatus() {
   const major = Number(process.versions.node.split('.')[0]);
   line(major >= 20, `Node v${process.versions.node} (needs 20 or newer)`); if (major < 20) bad = true;
 
-  const cfg = loadConfig();
+  const cfg = loadConfig(defaultHome(), { migrate: true });
   if (!cfg) { line(false, `no saved login. Run: slopstream login   (expected ${configFile()})`); return 1; }
   line(true, `saved login: user "${cfg.user}", relay ${cfg.relay}`);
+  if (!cfg.token) { line(false, `the saved token could not be read (${cfg.tokenError || 'missing'}). Run: slopstream login`); return 1; }
 
   let ws;
   try { ws = await admin(cfg); line(true, 'relay reachable and login accepted'); }
@@ -45,10 +36,11 @@ export async function runStatus() {
     try { ws.close(); } catch {}
   }
 
-  const claude = ver('claude');
+  const claude = ver(binFor('claude'));
   if (!claude) line(null, 'Claude Code: not found on this machine (only needed if you use Claude)');
-  else line(atLeast(claude.parts, [2, 1, 80]), `Claude Code ${claude.text} (channels need 2.1.80 or newer)`);
-  const codex = ver('codex');
+  else line(atLeast(claude.parts, CLAUDE_MIN), `Claude Code ${claude.text} (channels need 2.1.80 or newer)`);
+  const codex = ver(binFor('codex'));
   line(null, codex ? `Codex ${codex.text}` : 'Codex: not found on this machine (only needed if you use Codex)');
+  console.log('\nSomething wrong? Run: slopstream doctor');
   return bad ? 1 : 0;
 }

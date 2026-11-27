@@ -1,13 +1,13 @@
 {
   "name": "slopstream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Your agent can ask mine. Let AI agents (Claude Code, Codex) consult each other directly across people, with each person approving what's shared. Log in with GitHub, send one link.",
   "directories": {
     "test": "test"
   },
   "scripts": {
     "relay": "node relay/server.js",
-    "test": "node test/core.js && node test/e2e.js && node test/codex.js && node test/group.js && node test/login.js"
+    "test": "node test/unit.js && node test/core.js && node test/e2e.js && node test/codex.js && node test/group.js && node test/login.js && node test/confirm.js && node test/doctor.js"
   },
   "keywords": [
     "mcp",
@@ -38,6 +38,7 @@
     ".claude-plugin/",
     "README.md",
     "product.md",
+    "CHANGELOG.md",
     "SECURITY.md",
     "THREAT_MODEL.md",
     "PRIVACY.md",

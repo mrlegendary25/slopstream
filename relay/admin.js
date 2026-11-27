@@ -3,6 +3,7 @@
 //   node relay/admin.js add-user himnish
 //   node relay/admin.js list-users
 //   node relay/admin.js remove-user himnish
+//   node relay/admin.js stats          (daily counters and weekly active links; counts only)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -26,6 +27,11 @@ if (cmd === 'add-user') {
   console.log(Object.keys(read()).join('\n') || '(none)');
 } else if (cmd === 'remove-user') {
   const users = read(); delete users[name]; write(users); console.log(`removed ${name}`);
+} else if (cmd === 'stats') {
+  // Daily counters and weekly active links, from this data dir. Counts only: no names, labels or message text.
+  const { FileKV } = await import('./kv-file.js');
+  const { statsReport } = await import('./core.js');
+  console.log(JSON.stringify(statsReport(new FileKV(DATA)), null, 2));
 } else {
-  console.error('usage: admin.js add-user|list-users|remove-user [name]'); process.exit(1);
+  console.error('usage: admin.js add-user|list-users|remove-user [name]  |  stats'); process.exit(1);
 }

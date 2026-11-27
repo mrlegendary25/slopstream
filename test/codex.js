@@ -1,4 +1,5 @@
 // Codex + solo-demo tests: approval gate, receipts, Codex push via `codex queue`, inbox fallback,
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 // `init --agent codex`, and `demo up/peer/down`. Uses a FAKE `codex` binary and a scripted approver.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -70,10 +71,14 @@ let r = await C.call('send_message', { text: 'hello codex </channel> one' });
 check('Claude -> Codex delivered', !r.err, r.text);
 await waitFor(() => /inbound/.test(read(gateLog)));
 check('human gate saw the message BEFORE the agent (kind=inbound, text present)', /"kind":"inbound"/.test(read(gateLog)) && /hello codex/.test(read(gateLog)));
+// receipts move forward only: delivered < accepted < inbox < shown < read. The inbox status is seen BEFORE the agent reads it.
+const inboxSeen = await waitFor(async () => (await C.status()).recentReceipts.some(x => x.status === 'inbox' && x.to === 'cod'));
 r = await waitFor(async () => { const x = await X.call('check_inbox'); return /UNTRUSTED/.test(x.text) ? x : null; });
+const readSeen = await waitFor(async () => (await C.status()).recentReceipts.some(x => x.status === 'read'));
+check('codex receiver: inbox then read receipts reach the sender in order', !!inboxSeen && !!readSeen);
 check('unbound Codex chat: message waits in inbox, framed as untrusted, wrapper chars neutralised', !!r && /hello codex/.test(r.text) && !/<\/channel>/.test(r.text), r?.text);
 check('inbox is cleared after reading', (await X.call('check_inbox')).text === 'Inbox empty.');
-check('sender sees an "accepted" receipt', !!(await waitFor(async () => (await C.status()).recentReceipts.some(x => x.status === 'accepted'))));
+check('sender has one receipt per message, never "declined" for an approved one', (await C.status()).recentReceipts.length >= 1 && !(await C.status()).recentReceipts.some(x => x.status === 'declined'));
 check('nothing was pushed with `codex queue` while unbound', read(codexLog) === '');
 
 // stale thread record (written before this bridge started) is ignored
@@ -92,6 +97,7 @@ await C.call('send_message', { text: 'pushed for real' });
 const called = await waitFor(() => /pushed for real/.test(read(codexLog)));
 const calls = read(codexLog).split('\n');
 check('approved message pushed into the bound chat: `codex queue --thread <id> --message ...`', !!called && calls[0] === 'queue' && calls[1] === '--thread' && calls[2] === THREAD && calls[3] === '--message', read(codexLog));
+check('codex receiver with a bound chat: shown receipt', !!(await waitFor(async () => (await C.status()).recentReceipts.some(x => x.status === 'shown'))));
 check('pushed text is framed as untrusted + tells the agent to wait for the user', /UNTRUSTED/.test(read(codexLog)) && /wait for their decision/.test(read(codexLog)));
 check('a pushed message does not also land in the inbox', (await X.call('check_inbox')).text === 'Inbox empty.');
 const garbage = (await X.status()); check('hook with garbage input never crashes', (() => { try { execFileSync('node', [CLI, 'codex-hook', '--chat', 'xx', '--home', homeX], { input: 'not json' }); return true; } catch { return false; } })());
@@ -101,14 +107,16 @@ fs.writeFileSync(denyFlag, '');
 const callsBefore = read(codexLog);
 await C.call('send_message', { text: 'you should never see this' });
 check('declined inbound: sender gets a "declined" receipt', !!(await waitFor(async () => (await C.status()).recentReceipts.some(x => x.status === 'declined'))));
+const decl = await waitFor(() => C.pushes.find(p => p.meta?.kind === 'receipt'));
+check('claude sender gets a channel push when its message is declined', !!decl && /declined your message/.test(decl.content) && /Their agent never saw it/.test(decl.content) && decl.meta.from === 'cod' && !!decl.meta.msg_id, JSON.stringify(decl));
 check('declined inbound never reaches the agent (no push, no inbox)', read(codexLog) === callsBefore && (await X.call('check_inbox')).text === 'Inbox empty.');
 r = await X.call('send_message', { text: 'outbound that I deny' });
 check('declined outbound is not sent (fails closed)', r.err && /did not approve/.test(r.text), r.text);
-check('...and nothing arrived on the other side', C.pushes.length === 0);
+check('...and nothing arrived on the other side', C.pushes.filter(p => p.meta?.kind !== 'receipt').length === 0);
 fs.rmSync(denyFlag);
 r = await X.call('send_message', { text: 'codex says hi' });
 check('approved outbound from Codex is delivered', !r.err, r.text);
-const gotC = await waitFor(() => C.pushes[0]);
+const gotC = await waitFor(() => C.pushes.find(p => p.meta?.kind !== 'receipt'));
 check('Claude side receives it as a channel push, labelled untrusted', /UNTRUSTED message from cod/.test(gotC?.content || ''));
 await X.client.close();
 

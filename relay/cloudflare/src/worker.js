@@ -14,7 +14,7 @@ export class RelayDO extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.byWs = new WeakMap();
-    this.core = new RelayCore({ kv: new SqlKV(ctx.storage.sql), config: configFromEnv(env) });
+    this.core = new RelayCore({ kv: new SqlKV(ctx.storage.sql, { auditRetentionDays: Number(env.AUDIT_RETENTION_DAYS) || 30 }), config: configFromEnv(env) });
     // Answer heartbeats without waking the object (exact string match).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
     // Re-register every socket that survived hibernation, so sweep() still sees unauthenticated ones
@@ -52,7 +52,7 @@ export class RelayDO extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     const body = request.method === 'POST' ? (await request.text()).slice(0, 4096) : '';
-    const r = await this.core.handleHttp({ method: request.method, path: url.pathname, body, ip });
+    const r = await this.core.handleHttp({ method: request.method, path: url.pathname, query: url.search.slice(1), headers: Object.fromEntries(request.headers), body, ip });
     if (this.core.hasPendingState()) await this.ensureAlarm();
     return new Response(r.body, { status: r.status, headers: r.headers });
   }

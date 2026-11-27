@@ -1,4 +1,5 @@
 // End-to-end: GitHub login (fake GitHub), `link` + `join`, later approval, devices, logout, join page, human-only guard.
+process.env.SLOPSTREAM_KEYCHAIN = 'off'; // tests must never touch the real keychain (children inherit this)
 // Set RELAY_URL (e.g. ws://127.0.0.1:18800) to run against an already-running relay instead of spawning the Node one.
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { startFakeGitHub } from './fake-github.js';
+import { loadConfig } from '../bridge/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'bridge/cli.js');
@@ -52,8 +54,9 @@ async function login(n, id, login) {
 // 1-2. logins
 const la = await login('alice', 1, 'Alice');
 check('alice logs in via GitHub device flow', la.code === 0 && /Logged in as alice/.test(la.out), la.out);
-const cfgA = JSON.parse(fs.readFileSync(path.join(home('alice'), 'config.json'), 'utf8'));
+const cfgA = loadConfig(home('alice'));
 check('config has auth:github and an sst_ token', cfgA.auth === 'github' && cfgA.token.startsWith('sst_'));
+check('config keeps working with tokenStore file', JSON.parse(fs.readFileSync(path.join(home('alice'), 'config.json'), 'utf8')).tokenStore === 'file');
 const lb = await login('bob', 2, 'Bob'); const lc = await login('carol', 3, 'Carol');
 check('bob and carol log in', /Logged in as bob/.test(lb.out) && /Logged in as carol/.test(lc.out));
 check('whoami shows alice', /alice/.test(run('alice', TMP, 'whoami').out));
@@ -106,8 +109,21 @@ check('carol\'s waiting join prints Linked!', (await joinC.exit) === 0 && /Linke
 
 // 10. used link
 const again = run('carol', pD, 'join', url2, 'x', '--yes');
-check('reusing a used link fails with a clear message', again.code === 1 && /expired|used|unknown/i.test(again.out), again.out);
+check('reusing a used link fails with a clear message', again.code === 1 && /expired|used|unknown/i.test(again.out) && again.out.includes('→'), again.out);
 check('GET /j/<code> of a used invite is 404', (await fetch(url2)).status === 404);
+
+// 10b. directed invite: link @bob
+const linkDir = start('alice', proj('F'), 'link', '@bob', 'dirchat', '--yes');
+const urlDir = (await waitFor(() => linkDir.out().match(/https?:\/\/\S+\/j\/[a-z2-9]{5}-[a-z2-9]{5}/)))?.[0];
+check('link @bob prints a url and says only bob can use it', !!urlDir && /only @bob can use it/.test(linkDir.out()) && /slopstream requests/.test(linkDir.out()), linkDir.out());
+check('the join page says it is for bob', /This invite is for @bob/.test(await (await fetch(urlDir)).text()));
+const rqBob = run('bob', TMP, 'requests');
+check('bob sees it under "Invites for you"', /Invites for you/.test(rqBob.out) && rqBob.out.includes(urlDir.split('/j/')[1]) && /→ slopstream join/.test(rqBob.out), rqBob.out);
+const joinCarolDir = run('carol', proj('G'), 'join', urlDir, 'x', '--yes');
+check('carol cannot join an invite made for bob', joinCarolDir.code === 1 && /someone else/.test(joinCarolDir.out) && /→/.test(joinCarolDir.out), joinCarolDir.out);
+const joinBobDir = start('bob', proj('H'), 'join', urlDir, 'dirjoin', '--yes');
+const [cd1, cd2] = await Promise.all([linkDir.exit, joinBobDir.exit]);
+check('bob joins with it and both print Linked!', cd1 === 0 && cd2 === 0 && /Linked!/.test(joinBobDir.out()), linkDir.out() + joinBobDir.out());
 
 // 11. human-only guard
 const guard = spawnSync('node', [CLI, 'join', 'aaaaa-bbbbb'], { cwd: pD, env: { ...env('carol'), SLOPSTREAM_ALLOW_NONINTERACTIVE: '' }, encoding: 'utf8' });
