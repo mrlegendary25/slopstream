@@ -233,6 +233,20 @@ function world(env = {}, kv2 = newKv()) {
   check('hasPendingState true with an open invite', w.core.hasPendingState() === true);
 }
 
+// ---- AUDIT_TEXT=0 keeps message text out of the audit log ----
+{
+  const w = world({ AUDIT_TEXT: '0' });
+  const a = w.hi('alice', 'ta'); const b = w.hi('bob', 'tb');
+  w.sy(a, { t: 'pair_create', chat: 'web' }); const code = last(a, 'pair_code').code;
+  w.sy(b, { t: 'pair_accept', code, chat: 'api' }); w.sy(a, { t: 'pair_decision', code, ok: true });
+  const sa = w.hi('alice', 'ta'); w.core.onClose(sa); // keep helper symmetrical; real sessions below
+  const mk = (u, t, ch) => { const c = w.op(); w.core.onMessage(c, JSON.stringify({ t: 'hello', user: u, token: t, chat: ch })); return c; };
+  const s1 = mk('alice', 'ta', 'web'); mk('bob', 'tb', 'api');
+  w.sy(s1, { t: 'msg', id: 'x1', parts: [{ kind: 'text', text: 'SECRET-TEXT' }] });
+  const rec = w.kv.audit.find(r => r.ev === 'msg');
+  check('AUDIT_TEXT=0: msg audit record exists without text', !!rec && !('text' in rec) && !JSON.stringify(w.kv.audit).includes('SECRET-TEXT'));
+}
+
 // ---- T5: zombie takeover ----
 {
   const w = world();
