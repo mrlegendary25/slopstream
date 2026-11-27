@@ -28,6 +28,9 @@ export const ERRORS = {
   github_unavailable: { msg: 'The relay could not reach GitHub.', fix: 'Try again in a minute.' },
   name_taken: { msg: 'That username is already used on this relay.', fix: 'Log in again and pick another name: slopstream login' },
   bad_json: { msg: 'The relay could not read that request.', fix: 'Update slopstream: npm install -g slopstream@latest' },
+  bad_target: { msg: 'That is not a valid username.', fix: 'Use their GitHub username, like: slopstream link @alice' },
+  too_many_directed: { msg: 'You have sent too many invites to named people today.', fix: 'Try again tomorrow, or share a plain link: slopstream link' },
+  not_for_you: { msg: 'This invite was made for someone else.', fix: 'Ask the sender for an invite made for you, or a plain link.' },
   too_many_confirms: { msg: 'You have too many requests waiting for approval in your browser.', fix: 'Finish or wait out the open ones (they expire in 10 minutes), then try again.' },
   upgrade_required: { msg: 'This relay needs a newer slopstream.', fix: 'Run: npm install -g slopstream@latest   (Claude plugin: /plugin update slopstream)' },
   // Bridge-side reasons (no relay code)

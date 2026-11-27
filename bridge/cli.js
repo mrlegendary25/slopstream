@@ -147,7 +147,9 @@ async function main() {
     case 'link': {
       requireHuman('link');
       const cfg = await ensureLoggedIn(DEFAULT_RELAY);
-      const chat = rest[0] || defaultChat(process.cwd());
+      // `link @alice [chat]`: an invite only @alice can use. Otherwise `link [chat]` makes a link anyone you send it to can use.
+      const target = rest[0]?.startsWith('@') ? rest[0].slice(1) : null;
+      const chat = (target ? rest[1] : rest[0]) || defaultChat(process.cwd());
       console.log(`Chat label: ${chat}`);
       const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'list_links' }));
@@ -159,11 +161,12 @@ async function main() {
         die(`"${chat}" is already linked with ${peers}. To add another person to that group, run: slopstream link --add`);
       }
       const init = args.includes('--no-init') ? null : initFolder(chat);
-      ws.send(JSON.stringify({ t: add ? 'invite_create' : 'pair_create', chat }));
+      ws.send(JSON.stringify({ t: add ? 'invite_create' : 'pair_create', chat, ...(target ? { for: target } : {}) }));
       const c = await nextMsg(ws, ['pair_code']);
       const mine = (m) => normCode(m.code) === normCode(c.code);
       const until = new Date(Date.now() + c.expiresInSec * 1000).toLocaleString();
-      console.log(`\nSend this to your teammate:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
+      console.log(`\nSend this to ${target ? `@${target}` : 'your teammate'}:\n\n  Link our agents: ${c.url || c.code}\n\n(valid for ${Math.round(c.expiresInSec / 3600)} hours, works once${target ? `, and only @${target} can use it` : ''}). Waiting for them to join... (Ctrl+C is fine; approve later with: slopstream requests)`);
+      if (target) console.log(`If @${target} uses slopstream on this relay, they'll also see it in: slopstream requests`);
       const stays = () => { console.log(`\nThe invite stays valid until ${until}. When someone uses it, approve with: slopstream requests`); process.exit(0); };
       process.on('SIGINT', stays); ws.on('close', stays);
       const viaBrowser = await browserConfirms(cfg);
@@ -291,8 +294,13 @@ async function main() {
     case 'requests': {
       const ws = await admin(needCfg());
       ws.send(JSON.stringify({ t: 'list_requests' }));
-      const { invites } = await nextMsg(ws, ['requests'], 5000);
-      if (!invites.length) console.log('No open invites.');
+      const { invites, incoming = [] } = await nextMsg(ws, ['requests'], 5000);
+      if (incoming.length) {
+        console.log('Invites for you:');
+        for (const v of incoming) console.log(`  ${v.code}  from @${v.from.user}${v.from.github ? ` (github.com/${v.from.github})` : ''}, chat "${v.chat}"  expires ${new Date(v.expiresAt).toLocaleString()}\n    → slopstream join ${v.code}`);
+        console.log('');
+      }
+      if (!invites.length) console.log(incoming.length ? 'No invites of yours are open.' : 'No open invites.');
       for (const v of invites) {
         const r = v.requester;
         console.log(`${v.code}  ${v.kind}  chat "${v.chat}"  expires ${new Date(v.expiresAt).toLocaleString()}  ` +
@@ -434,7 +442,8 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       console.log(`slopstream: your agent can ask mine.
 
 usage: slopstream <command>
-  link [chat] [--agent claude|codex] [--add]   make an invite link for this folder and wait for your teammate
+  link [@user] [chat] [--agent ..] [--add]   make an invite link for this folder and wait for your teammate
+                                      (with @user, only that person can use it)
   join <code-or-link> [chat]         link this folder to a teammate's invite
   login [--relay <url>]              log in with GitHub (once per machine)
   whoami                             show who you are logged in as and check it works

@@ -112,6 +112,19 @@ const again = run('carol', pD, 'join', url2, 'x', '--yes');
 check('reusing a used link fails with a clear message', again.code === 1 && /expired|used|unknown/i.test(again.out) && again.out.includes('→'), again.out);
 check('GET /j/<code> of a used invite is 404', (await fetch(url2)).status === 404);
 
+// 10b. directed invite: link @bob
+const linkDir = start('alice', proj('F'), 'link', '@bob', 'dirchat', '--yes');
+const urlDir = (await waitFor(() => linkDir.out().match(/https?:\/\/\S+\/j\/[a-z2-9]{5}-[a-z2-9]{5}/)))?.[0];
+check('link @bob prints a url and says only bob can use it', !!urlDir && /only @bob can use it/.test(linkDir.out()) && /slopstream requests/.test(linkDir.out()), linkDir.out());
+check('the join page says it is for bob', /This invite is for @bob/.test(await (await fetch(urlDir)).text()));
+const rqBob = run('bob', TMP, 'requests');
+check('bob sees it under "Invites for you"', /Invites for you/.test(rqBob.out) && rqBob.out.includes(urlDir.split('/j/')[1]) && /→ slopstream join/.test(rqBob.out), rqBob.out);
+const joinCarolDir = run('carol', proj('G'), 'join', urlDir, 'x', '--yes');
+check('carol cannot join an invite made for bob', joinCarolDir.code === 1 && /someone else/.test(joinCarolDir.out) && /→/.test(joinCarolDir.out), joinCarolDir.out);
+const joinBobDir = start('bob', proj('H'), 'join', urlDir, 'dirjoin', '--yes');
+const [cd1, cd2] = await Promise.all([linkDir.exit, joinBobDir.exit]);
+check('bob joins with it and both print Linked!', cd1 === 0 && cd2 === 0 && /Linked!/.test(joinBobDir.out()), linkDir.out() + joinBobDir.out());
+
 // 11. human-only guard
 const guard = spawnSync('node', [CLI, 'join', 'aaaaa-bbbbb'], { cwd: pD, env: { ...env('carol'), SLOPSTREAM_ALLOW_NONINTERACTIVE: '' }, encoding: 'utf8' });
 check('join without a TTY is refused', guard.status === 1 && /must be typed by a person/.test(guard.stderr), guard.stderr);

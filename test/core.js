@@ -306,6 +306,50 @@ function world(env = {}, kv2 = newKv()) {
   check('at most 5 open confirms per user (too_many_confirms)', e2.sent.filter(m => m.t === 'confirm_required').length === 5 && last(e2, 'error')?.code === 'too_many_confirms', JSON.stringify(e2.sent.map(m => m.t + ':' + (m.code || ''))));
 }
 
+// ---- T6: directed invites ----
+{
+  const kv6 = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), Carol: sha('tc') } });
+  const core6 = new RelayCore({ kv: kv6, config: configFromEnv({ PUBLIC_URL: 'https://r.test', MAX_OPEN_INVITES: '100' }), now: () => clock });
+  const adm6 = (u, t, ip = '3.3.3.3') => { const c = new FakeConn(); core6.openConn(c, { ip }); core6.onMessage(c, JSON.stringify({ t: 'hello', v: 3, user: u, token: t })); return c; };
+  const sy6 = (c, o) => core6.onMessage(c, JSON.stringify(o));
+  const al = adm6('alice', 'ta'); const bo = adm6('bob', 'tb'); const ca = adm6('Carol', 'tc');
+  sy6(al, { t: 'pair_create', chat: 'web', for: '@Bob' });
+  const dc = last(al, 'pair_code');
+  check('directed invite: the named user (with or without @, any case) gets invite_for_you at once', last(bo, 'invite_for_you')?.code === dc.code && last(bo, 'invite_for_you')?.from.user === 'alice' && !last(ca, 'invite_for_you'));
+  sy6(ca, { t: 'pair_accept', code: dc.code, chat: 'x' });
+  check('directed invite: only the named user can accept (others get not_for_you)', last(ca, 'error')?.code === 'not_for_you' && !last(ca, 'pair_waiting'));
+  check('wrong user gets not_for_you and it counts toward the limiter', (() => {
+    const evil = adm6('Carol', 'tc', '4.4.4.4');
+    for (let i = 0; i < 10; i++) sy6(evil, { t: 'pair_accept', code: dc.code, chat: 'x' + i });
+    return last(evil, 'error')?.code === 'too_many_attempts';
+  })());
+  const ghost = (() => { sy6(al, { t: 'pair_create', chat: 'web2', for: 'nobody-here' }); return last(al, 'pair_code'); })();
+  const real = (() => { sy6(al, { t: 'pair_create', chat: 'web3', for: 'bob' }); return last(al, 'pair_code'); })();
+  check('directed invite to a nonexistent user gets the same reply as to a real one', Object.keys(ghost).sort().join() === Object.keys(real).sort().join() && /^[a-z2-9]{5}-[a-z2-9]{5}$/.test(ghost.code) && !al.sent.some(m => m.t === 'error' && m.code === 'bad_target'));
+  sy6(bo, { t: 'list_requests' });
+  const rq = last(bo, 'requests');
+  check('incoming invites listed for the target', rq.incoming.length === 2 && rq.incoming.every(i => i.from.user === 'alice' && i.url.startsWith('https://r.test/j/')) && rq.incoming.some(i => i.code === dc.code));
+  sy6(al, { t: 'list_requests' });
+  check('the sender does not see their own invites as incoming', last(al, 'requests').incoming.length === 0);
+  sy6(al, { t: 'pair_create', chat: 'self', for: 'alice' });
+  check('inviting yourself -> bad_target', last(al, 'error')?.code === 'bad_target');
+  sy6(al, { t: 'pair_create', chat: 'bad', for: 'no spaces allowed' });
+  check('an invalid username -> bad_target', last(al, 'error')?.code === 'bad_target');
+  const inf = await core6.handleHttp({ method: 'GET', path: '/v1/invite/' + dc.code, body: '', ip: '' });
+  const pg = await core6.handleHttp({ method: 'GET', path: '/j/' + dc.code, body: '', ip: '' });
+  check('invite JSON and join page say who it is for', JSON.parse(inf.body).for === 'bob' && /This invite is for @bob/.test(pg.body));
+  sy6(bo, { t: 'pair_accept', code: dc.code, chat: 'api' });
+  check('the named user can accept', !!last(bo, 'pair_waiting'));
+  sy6(bo, { t: 'list_requests' });
+  check('a used directed invite is no longer "incoming"', !last(bo, 'requests').incoming.some(i => i.code === dc.code));
+  // limit
+  const fresh = adm6('alice', 'ta', '6.6.6.6');
+  let n = 0; for (let i = 0; i < 25; i++) { sy6(fresh, { t: 'pair_create', chat: 'lim' + i, for: 'bob' }); if (fresh.sent.filter(m => m.t === 'pair_code').length > n) n++; }
+  check('21st directed invite in a day -> too_many_directed', last(fresh, 'error')?.code === 'too_many_directed' && n === 17, `${n}`); // 3 were already sent today: 17 more fit, the next is refused
+  check('the daily counter is swept after two days', (() => { clock += 3 * 86400000; core6.sweep(); return kv6.list('dirinv:').length === 0; })());
+  clock -= 3 * 86400000;
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

@@ -17,6 +17,7 @@ const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to
 const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
 const CONFIRM_MAX_OPEN = 5;
+const MAX_DIRECTED_PER_DAY = 20;
 const SESSION_MS = 15 * 60 * 1000;
 const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ACCEPT_FAIL_MAX = 10;
@@ -136,6 +137,8 @@ export class RelayCore {
     for (const [k, inv] of this.kv.list('invite:')) if (inv.exp < now) this.kv.del(k);
     for (const [k, d] of this.kv.list('devauth:')) if (d.exp < now) this.kv.del(k);
     for (const [k, o] of this.kv.list('oauth:')) if (o.exp < now) this.kv.del(k);
+    const keepFrom = new Date(now - 2 * 86400000).toISOString().slice(0, 10); // daily directed-invite counters live two days
+    for (const [k] of this.kv.list('dirinv:')) if (k.split(':').pop() < keepFrom) this.kv.del(k);
     for (const [k, cf] of this.kv.list('confirm:')) {
       if (cf.exp >= now) continue;
       this.kv.del(k);
@@ -170,12 +173,12 @@ export class RelayCore {
       const inv = this.getInvite(decodeURIComponent(path.slice('/v1/invite/'.length)));
       if (!inv) return json(404, { status: 'not_found' });
       if (inv.requester) return json(200, { status: 'used' });
-      return json(200, { status: 'open', inviter: inv.user, inviterGithub: this.githubOf(inv.user), chat: inv.chat, kind: inv.kind, expiresAt: inv.exp });
+      return json(200, { status: 'open', inviter: inv.user, inviterGithub: this.githubOf(inv.user), chat: inv.chat, kind: inv.kind, expiresAt: inv.exp, ...(inv.forUser ? { for: inv.forUser } : {}) });
     }
     if (method === 'GET' && path.startsWith('/j/')) {
       let inv; try { inv = this.getInvite(decodeURIComponent(path.slice(3))); } catch { inv = undefined; }
       if (!inv || inv.requester) return html(404, gonePage());
-      return html(200, invitePage({ inviter: inv.user, inviterGithub: this.githubOf(inv.user), code: displayCode(inv.code), expiresAt: inv.exp }));
+      return html(200, invitePage({ inviter: inv.user, inviterGithub: this.githubOf(inv.user), code: displayCode(inv.code), expiresAt: inv.exp, forUser: inv.forUser || null }));
     }
     if (method === 'GET' && path === '/') return html(200, landingPage());
     if (path.startsWith('/c/') && (method === 'GET' || method === 'POST')) return this.confirmPageRoute(req);
@@ -448,14 +451,29 @@ export class RelayCore {
   userInvites(user) { return this.kv.list('invite:').map(([, v]) => v).filter(v => v.user === user && v.exp >= this.now()); }
   adminConnsOf(user) { return [...this.conns.values()].filter(c => c.meta.authed && c.meta.mode === 'admin' && c.meta.user === user); }
   githubOf(user) { return this.kv.get('account:' + user)?.ghLogin || null; }
-  makeInvite(conn, chat, groupId) {
+  // `forUser` makes a directed invite (only that person can use it). D7: the relay never says whether that user exists.
+  makeInvite(conn, chat, groupId, forUser = null) {
     const user = conn.meta.user;
     const { maxOpenInvites, inviteTtlMs, publicUrl } = this.config;
     if (this.userInvites(user).length >= maxOpenInvites) { conn.send({ t: 'error', code: 'too_many_invites', message: `you already have ${maxOpenInvites} open invites; cancel some first` }); return; }
+    let dayKey = null;
+    if (forUser) {
+      dayKey = `dirinv:${user}:${new Date(this.now()).toISOString().slice(0, 10)}`;
+      if ((this.kv.get(dayKey) || 0) >= MAX_DIRECTED_PER_DAY) { conn.send({ t: 'error', code: 'too_many_directed', message: `you can send at most ${MAX_DIRECTED_PER_DAY} invites to named people per day` }); return; }
+    }
     const code = this.newCode();
     const createdAt = this.now();
-    this.kv.put('invite:' + code, { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null });
-    conn.send({ t: 'pair_code', code: displayCode(code), url: `${publicUrl}/j/${displayCode(code)}`, expiresInSec: inviteTtlMs / 1000 });
+    const inv = { code, kind: groupId ? 'group' : 'pair', user, chat, groupId: groupId || null, createdAt, exp: createdAt + inviteTtlMs, requester: null, ...(forUser ? { forUser } : {}) };
+    this.kv.put('invite:' + code, inv);
+    if (dayKey) this.kv.put(dayKey, (this.kv.get(dayKey) || 0) + 1);
+    const url = `${publicUrl}/j/${displayCode(code)}`;
+    conn.send({ t: 'pair_code', code: displayCode(code), url, expiresInSec: inviteTtlMs / 1000 });
+    // If the named person has a terminal open, they see it at once. Same reply to the sender either way.
+    if (forUser) for (const c of [...this.conns.values()]) if (c.meta.authed && c.meta.mode === 'admin' && c.meta.user.toLowerCase() === forUser) c.send(this.incomingOf(inv));
+    return inv;
+  }
+  incomingOf(inv) {
+    return { t: 'invite_for_you', code: displayCode(inv.code), url: `${this.config.publicUrl}/j/${displayCode(inv.code)}`, from: { user: inv.user, github: this.githubOf(inv.user) }, chat: inv.chat, expiresAt: inv.exp };
   }
   connOf(user, chat) { const id = this.online.get(key(user, chat)); return id ? this.conns.get(id) : undefined; }
   findLink(user, chat) { return this.links.find(l => l.members.some(m => m.user === user && m.chat === chat)); }
@@ -552,6 +570,14 @@ export class RelayCore {
     if (conn.meta.mode === 'session') return this.handleSession(conn, m);
   }
 
+  // null: not directed. false: invalid (or yourself). Otherwise the lower-cased username. Usernames are stored lower-case.
+  targetOf(conn, m) {
+    if (m.for === undefined || m.for === null || m.for === '') return null;
+    const t = String(m.for).replace(/^@/, '').toLowerCase();
+    if (!NAME_RE.test(t) || t === conn.meta.user.toLowerCase()) return false;
+    return t;
+  }
+
   // ---- pairing steps. Called from the socket (no confirmation needed) and from the browser (after Approve). ----
   // `send` is where replies go: the one connection that asked, or all of the person's admin connections.
   // Returns { inv } when allowed, or { code, message } when not.
@@ -567,6 +593,7 @@ export class RelayCore {
     const inv = this.getInvite(code);
     if (!inv) { fails.push(now); return bad('bad_code', 'unknown or expired code'); }
     if (inv.user === user) return bad('same_user', 'cannot pair with yourself');
+    if (inv.forUser && inv.forUser !== user.toLowerCase()) { fails.push(now); return bad('not_for_you', 'this invite is for someone else'); }
     if (this.findLink(user, chat)) return bad('already_linked', `chat "${chat}" is already linked`);
     if (inv.requester) return bad('busy', 'code already in use');
     if (inv.groupId) {
@@ -636,8 +663,10 @@ export class RelayCore {
         const chat = String(m.chat || '');
         if (!NAME_RE.test(chat)) return err('bad_chat', 'invalid chat label');
         if (this.findLink(user, chat)) return err('already_linked', `chat "${chat}" is already linked`);
-        this.makeInvite(conn, chat, null);
-        return this.audit({ ev: 'pair_create', user, chat });
+        const forUser = this.targetOf(conn, m);
+        if (forUser === false) return err('bad_target', 'that is not a valid username');
+        if (!this.makeInvite(conn, chat, null, forUser)) return;
+        return this.audit({ ev: 'pair_create', user, chat, directed: !!forUser });
       }
       case 'invite_create': {
         // Add a NEW chat to a group that already has at least one link, up to maxGroupSize.
@@ -646,8 +675,10 @@ export class RelayCore {
         const link = this.findLink(user, chat);
         if (!link) return err('not_linked', `chat "${chat}" is not linked yet; use pair-create first`);
         if (link.members.length >= maxGroupSize) return err('group_full', `this group already has the maximum of ${maxGroupSize} chats`);
-        this.makeInvite(conn, chat, link.id);
-        return this.audit({ ev: 'invite_create', user, chat, linkId: link.id });
+        const forUser = this.targetOf(conn, m);
+        if (forUser === false) return err('bad_target', 'that is not a valid username');
+        if (!this.makeInvite(conn, chat, link.id, forUser)) return;
+        return this.audit({ ev: 'invite_create', user, chat, linkId: link.id, directed: !!forUser });
       }
       case 'pair_accept': {
         const chat = String(m.chat || '');
@@ -692,7 +723,10 @@ export class RelayCore {
           code: displayCode(v.code), kind: v.kind, chat: v.chat, expiresAt: v.exp,
           requester: v.requester ? { user: v.requester.user, chat: v.requester.chat, github: this.githubOf(v.requester.user) } : null,
         }));
-        return conn.send({ t: 'requests', invites });
+        const incoming = this.kv.list('invite:').map(([, v]) => v)
+          .filter(v => v.forUser === user.toLowerCase() && !v.requester && v.exp >= this.now())
+          .map(v => { const { t, ...rest } = this.incomingOf(v); return rest; });
+        return conn.send({ t: 'requests', invites, incoming });
       }
       case 'invite_cancel': {
         const inv = this.getInvite(m.code);

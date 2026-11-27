@@ -22,7 +22,7 @@ const COPY_JS = `<script>document.querySelectorAll('button[data-c]').forEach(fun
 
 const cmd = (c) => `<div class="card cmd"><code>${esc(c)}</code><button data-c="${esc(c)}">Copy</button></div>`;
 
-export function invitePage({ inviter, inviterGithub, code, expiresAt }) {
+export function invitePage({ inviter, inviterGithub, code, expiresAt, forUser }) {
   const who = inviterGithub
     ? `<img src="https://avatars.githubusercontent.com/${esc(inviterGithub)}?s=64" width="32" height="32" alt=""><a href="https://github.com/${esc(inviterGithub)}">@${esc(inviter)}</a>`
     : `@${esc(inviter)}`;
@@ -34,6 +34,7 @@ export function invitePage({ inviter, inviterGithub, code, expiresAt }) {
 <li>Open a terminal <b>in the project folder</b> you want to link</li>
 <li>Run:</li>${cmd(`slopstream join ${code}`)}
 </ol>
+${forUser ? `<div class="card">This invite is for @${esc(forUser)}.</div>` : ''}
 <div class="card warn">Only continue if you know @${esc(inviter)}. Their agent will be able to send messages to your agent; you approve each one.</div>
 <p class="muted">This link expires ${esc(new Date(expiresAt).toUTCString())} and works once. <a href="${REPO}">slopstream on GitHub</a> · <a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></p>
 ${COPY_JS}`);
