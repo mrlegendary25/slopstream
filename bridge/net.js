@@ -6,7 +6,14 @@ export function admin(cfg) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(cfg.relay);
     ws.once('error', (e) => reject(new Error(`cannot reach relay ${cfg.relay}: ${e.message}`)));
-    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', user: cfg.user, token: cfg.token })));
+    let hb = null;
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ t: 'hello', v: 2, user: cfg.user, token: cfg.token }));
+      // `link` and `join` can wait a long time; keep proxies from dropping the idle socket.
+      hb = setInterval(() => { try { ws.send('{"t":"ping"}'); } catch { /* closing */ } }, 25000);
+      hb.unref?.();
+    });
+    ws.on('close', () => { if (hb) clearInterval(hb); });
     const onMsg = (raw) => {
       const m = JSON.parse(raw.toString());
       if (m.t === 'welcome') { ws.off('message', onMsg); resolve(ws); }
@@ -16,11 +23,17 @@ export function admin(cfg) {
   });
 }
 
-export const nextMsg = (ws, types, timeoutMs = 0) => new Promise((resolve, reject) => {
+// Same normalization as the relay: case-insensitive, dashes/spaces ignored. Kept separate so the
+// bridge never imports from relay/.
+export const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Resolves with the next message of one of `types` (that also passes `filter`, if given).
+// A relay `error` always rejects.
+export const nextMsg = (ws, types, timeoutMs = 0, filter = null) => new Promise((resolve, reject) => {
   let timer = null;
   const h = (raw) => {
     const m = JSON.parse(raw.toString());
-    if (types.includes(m.t) || m.t === 'error') {
+    if ((types.includes(m.t) && (!filter || filter(m))) || m.t === 'error') {
       ws.off('message', h); if (timer) clearTimeout(timer);
       m.t === 'error' ? reject(new Error(`${m.code}: ${m.message}`)) : resolve(m);
     }
@@ -36,9 +49,10 @@ export async function pairBoth(cfgA, chatA, cfgB, chatB) {
   try {
     wsA.send(JSON.stringify({ t: 'pair_create', chat: chatA }));
     const { code } = await nextMsg(wsA, ['pair_code'], 5000);
-    const reqP = nextMsg(wsA, ['pair_request'], 5000);
-    const pairedA = nextMsg(wsA, ['paired', 'pair_denied'], 5000);
-    const pairedB = nextMsg(wsB, ['paired', 'pair_denied'], 5000);
+    const mine = (m) => normCode(m.code) === normCode(code);
+    const reqP = nextMsg(wsA, ['pair_request'], 5000, mine);
+    const pairedA = nextMsg(wsA, ['paired', 'pair_denied'], 5000, mine);
+    const pairedB = nextMsg(wsB, ['paired', 'pair_denied'], 5000, mine);
     wsB.send(JSON.stringify({ t: 'pair_accept', code, chat: chatB }));
     const req = await reqP;
     wsA.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok: true }));
@@ -55,9 +69,10 @@ export async function inviteAndAccept(cfgInviter, chatInviter, cfgNew, chatNew) 
   try {
     wsI.send(JSON.stringify({ t: 'invite_create', chat: chatInviter }));
     const { code } = await nextMsg(wsI, ['pair_code'], 5000);
-    const reqP = nextMsg(wsI, ['pair_request'], 5000);
-    const pairedI = nextMsg(wsI, ['paired', 'pair_denied'], 5000);
-    const pairedN = nextMsg(wsN, ['paired', 'pair_denied'], 5000);
+    const mine = (m) => normCode(m.code) === normCode(code);
+    const reqP = nextMsg(wsI, ['pair_request'], 5000, mine);
+    const pairedI = nextMsg(wsI, ['paired', 'pair_denied'], 5000, mine);
+    const pairedN = nextMsg(wsN, ['paired', 'pair_denied'], 5000, mine);
     wsN.send(JSON.stringify({ t: 'pair_accept', code, chat: chatNew }));
     const req = await reqP;
     wsI.send(JSON.stringify({ t: 'pair_decision', code: req.code, ok: true }));

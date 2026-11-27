@@ -23,3 +23,6 @@ export function logLine(obj, home = defaultHome()) {
     fs.appendFileSync(logFile(home), JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n', { mode: 0o600 });
   } catch { /* logging must never break the bridge */ }
 }
+
+// Where `slopstream login` goes when nothing else says otherwise. (The hosted relay.)
+export const DEFAULT_RELAY = process.env.SLOPSTREAM_RELAY || 'wss://slopstream-relay.slopstream.workers.dev';

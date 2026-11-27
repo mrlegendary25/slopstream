@@ -1,5 +1,7 @@
 # Setup on Windows (fast path)
 
+> Using the hosted relay? You don't need this guide: see the Quick start in README.md. This guide is for self-hosting over Tailscale.
+
 *Part of [Slopstream](./README.md) · [Setup on macOS](./SETUP-MAC.md) · [Product overview](./product.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
 
 Minimum commands to get linked, in **PowerShell**. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires Windows 10 1809+ or 11, Node 20+, Claude Code ≥2.1.80.

@@ -23,18 +23,18 @@ export async function runStatus() {
   line(major >= 20, `Node v${process.versions.node} (needs 20 or newer)`); if (major < 20) bad = true;
 
   const cfg = loadConfig();
-  if (!cfg) { line(false, `no saved login. Run: slopstream setup <relay-url> <user> <token>   (expected ${configFile()})`); return 1; }
+  if (!cfg) { line(false, `no saved login. Run: slopstream login   (expected ${configFile()})`); return 1; }
   line(true, `saved login: user "${cfg.user}", relay ${cfg.relay}`);
 
   let ws;
   try { ws = await admin(cfg); line(true, 'relay reachable and login accepted'); }
-  catch (e) { line(false, e.message); line(null, 'hint: is the relay running, and is Tailscale connected on both Macs?'); bad = true; }
+  catch (e) { line(false, e.message); line(null, String(cfg.relay).startsWith('wss://') ? 'hint: check your internet connection, or the relay status' : 'hint: is the relay running, and is Tailscale connected on both Macs?'); bad = true; }
 
   if (ws) {
     try {
       ws.send(JSON.stringify({ t: 'list_links' }));
       const r = await nextMsg(ws, ['links']);
-      if (!r.links.length) line(null, 'no links yet. Pair a chat with: slopstream pair-create <chat>');
+      if (!r.links.length) line(null, 'no links yet. Link a chat with: slopstream link');
       for (const l of r.links) {
         const mine = l.members.find(m => m.user === cfg.user);
         const others = l.members.filter(m => m !== mine);

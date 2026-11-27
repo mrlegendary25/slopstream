@@ -1,6 +1,6 @@
 {
   "name": "slopstream",
-  "description": "Human-approved, chat-to-chat AI-agent messaging over your own Tailscale network.",
+  "description": "Human-approved, chat-to-chat AI-agent messaging.",
   "owner": { "name": "mrlegendary25" },
   "plugins": [
     {

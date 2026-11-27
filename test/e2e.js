@@ -17,7 +17,7 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : '  ' + extra}`); };
 async function waitFor(fn, ms = 5000) { const t = Date.now(); while (Date.now() - t < ms) { const v = await fn(); if (v) return v; await sleep(50); } return null; }
 
-const env = (home) => ({ ...process.env, SLOPSTREAM_HOME: path.join(TMP, home) });
+const env = (home) => ({ ...process.env, SLOPSTREAM_HOME: path.join(TMP, home), SLOPSTREAM_ALLOW_NONINTERACTIVE: '1' });
 const cli = (home, ...a) => execFileSync('node', [path.join(ROOT, 'bridge/cli.js'), ...a], { env: env(home), encoding: 'utf8' });
 
 // 1. relay
@@ -35,7 +35,7 @@ check('bad token rejected at setup', (() => { try { cli('x', 'setup', RELAY, 'hi
 // 3. pairing through the real CLI (creator approves)
 const creator = spawn('node', [path.join(ROOT, 'bridge/cli.js'), 'pair-create', 'projX', '--yes'], { env: env('h') });
 let out = ''; creator.stdout.on('data', d => out += d);
-const code = (await waitFor(() => out.match(/projX":\s+([0-9A-F]{8})/)))?.[1];
+const code = (await waitFor(() => out.match(/projX":\s+([a-z2-9]{5}-[a-z2-9]{5})/)))?.[1];
 check('pair code issued', !!code, out);
 const accepted = cli('a', 'pair-accept', code, 'projX');
 await waitFor(() => /Linked/.test(out));

@@ -1,5 +1,7 @@
 # Setup on macOS (fast path)
 
+> Using the hosted relay? You don't need this guide: see the Quick start in README.md. This guide is for self-hosting over Tailscale.
+
 *Part of [Slopstream](./README.md) · [Setup on Windows](./SETUP-WINDOWS.md) · [Product overview](./product.md) · [Testing guide](./TESTING.md) · [Contributing](./CONTRIBUTING.md)*
 
 Minimum commands to get linked. No explanations, no optional steps; if something breaks or you want to know *why*, see [README.md](./README.md) and [TESTING.md](./TESTING.md). Requires macOS 13+, Node 20+, Claude Code ≥2.1.80.
