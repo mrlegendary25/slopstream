@@ -18,8 +18,11 @@ export const atLeast = (parts, min) => { if (!parts) return true; for (let i = 0
 
 export const CLAUDE_MIN = [2, 1, 80];
 
+// SLOPSTREAM_CLAUDE_BIN / SLOPSTREAM_CODEX_BIN: full path to the binary, for installs that are not on PATH (and for tests).
+export const binFor = (name, env = process.env) => env[`SLOPSTREAM_${name.toUpperCase()}_BIN`] || name;
+
 export function detectAgents({ cwd = process.cwd(), run = defaultRun } = {}) {
-  const installed = { claude: ver('claude', run), codex: ver('codex', run) };
+  const installed = { claude: ver(binFor('claude'), run), codex: ver(binFor('codex'), run) };
   const has = (f) => fs.existsSync(path.join(cwd, f));
   const codexFolder = has('.codex');
   const claudeFolder = has('.mcp.json') || has('CLAUDE.md');

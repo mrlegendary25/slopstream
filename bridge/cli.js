@@ -16,6 +16,7 @@ import { detectAgents, chooseAgent, describeChoice } from './agents.js';
 import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runStatus } from './status.js';
+import { runDoctor } from './doctor.js';
 import { runSimulate } from './simulate.js';
 import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 
@@ -432,6 +433,7 @@ The "slopstream" command itself (the npm link) is NOT removed.`);
       break;
     }
     case 'status': process.exitCode = await runStatus(); break;
+    case 'doctor': process.exitCode = await runDoctor({ chat: opt('chat'), json: args.includes('--json') }); break;
     case 'simulate': {
       const chat = opt('chat'); if (!chat) die('usage: slopstream simulate --chat <chat-label> [--agent claude|codex]');
       if (opt('home')) process.env.SLOPSTREAM_HOME = path.resolve(opt('home'));
@@ -478,6 +480,7 @@ usage: slopstream <command>
                                       relay/server.js process on this machine.
   init <chat> [--agent claude|codex]  (in a project folder) wire this folder up for Claude Code or Codex
   status                             is this machine ready? who is online?
+  doctor [--chat <label>] [--json]   check every step (login, relay, this folder, link) and print the fix for each problem
   demo up|status|peer|down           test everything on THIS machine alone (see docs/testing.md)
   simulate --chat <chat> [--agent]   stand-in agent with no AI, for testing the plumbing`);
   }

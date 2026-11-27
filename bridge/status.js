@@ -2,7 +2,7 @@
 // your links and who is online right now, and which agents are installed.
 import { loadConfig, configFile, defaultHome } from './config.js';
 import { admin, nextMsg } from './net.js';
-import { ver, atLeast, CLAUDE_MIN } from './agents.js';
+import { ver, atLeast, binFor, CLAUDE_MIN } from './agents.js';
 
 export async function runStatus() {
   const line = (ok, msg) => console.log(`  ${ok === true ? '✓' : ok === false ? '✗' : '-'} ${msg}`);
@@ -36,10 +36,11 @@ export async function runStatus() {
     try { ws.close(); } catch {}
   }
 
-  const claude = ver('claude');
+  const claude = ver(binFor('claude'));
   if (!claude) line(null, 'Claude Code: not found on this machine (only needed if you use Claude)');
   else line(atLeast(claude.parts, CLAUDE_MIN), `Claude Code ${claude.text} (channels need 2.1.80 or newer)`);
-  const codex = ver('codex');
+  const codex = ver(binFor('codex'));
   line(null, codex ? `Codex ${codex.text}` : 'Codex: not found on this machine (only needed if you use Codex)');
+  console.log('\nSomething wrong? Run: slopstream doctor');
   return bad ? 1 : 0;
 }
