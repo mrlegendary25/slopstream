@@ -239,5 +239,47 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   fs.rmSync(h, { recursive: true, force: true });
 }
 
+// --- secret scanner ---
+{
+  const { scanSecrets, redactSecrets, RULE_IDS } = await import('../bridge/secret-scan.js');
+  // Every positive is built at runtime from pieces, so no realistic-looking secret sits in the source (GitHub push protection).
+  const rnd = (n, alpha = 'aB3dE5fG7hJ9kL2mN4pQ6rS8tU0vWxYz') => Array.from({ length: n }, (_, i) => alpha[(i * 7 + 3) % alpha.length]).join('');
+  const POS = {
+    private_key: '-----BEGIN ' + 'OPENSSH PRIVATE KEY-----',
+    aws_access_key: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP',
+    aws_secret_key: 'aws_secret_access_key = ' + rnd(40, 'aB3dE5fG7hJ9kL2mN4pQ6rS8tU0vWxYz/+'),
+    github_token: 'gh' + 'p_' + 'A1b2'.repeat(9),
+    slack_token: 'xo' + 'xb-' + '1234567890-abcdefghij',
+    stripe_key: 'sk' + '_live_' + 'abcdefghij0123456789',
+    google_api_key: 'AI' + 'za' + 'A1b2C3d4'.repeat(4) + 'xyz',
+    anthropic_key: 'sk' + '-ant-' + 'api03-abcdefghij0123456789',
+    openai_key: 'sk' + '-' + 'proj-abcdefghij0123456789',
+    npm_token: 'np' + 'm_' + 'a1B2'.repeat(9),
+    slopstream_token: 'ss' + 't_' + rnd(43),
+    jwt: 'ey' + 'Jhbgcioijiuzi1nij9.' + 'ey' + 'Jzdwiioixmjm0nta2nzg5.' + 'abcdefghij0123456',
+    url_credentials: 'postgres' + '://admin:hunter22pass@db.internal:5432/app',
+    secret_assignment: 'DB_PASSWORD=' + 'hunter2hunter2',
+    high_entropy: 'key is ' + rnd(40, 'aB3dE5fG7hJ9kL2mN4pQ6rS8tU0vWxYz1C') + 'Q',
+  };
+  const NEG = {
+    private_key: '-----BEGIN PUBLIC KEY-----', aws_access_key: 'AKIA is a prefix, AKIAshort', aws_secret_key: 'aws secret key rotation policy',
+    github_token: 'ghp_tooshort', slack_token: 'xoxb-short', stripe_key: 'sk_test_abcdefghij0123456789 and sk_live_short', google_api_key: 'AIzaShort',
+    anthropic_key: 'sk-ant-short', openai_key: 'sk-short', npm_token: 'npm_short', slopstream_token: 'sst_short', jwt: 'eyJ.eyJ.x',
+    url_credentials: 'https://example.com/path and ssh://git@github.com/x', secret_assignment: 'the env var is PAYMENTS_KEY; TOKEN=<your-token>; API_KEY=${API_KEY}; PASSWORD=process.env.PW; secret: xxxxxxxxxxxx',
+    high_entropy: 'src/components/navigation/HeaderNavigationBar/index and thisIsAVeryLongCamelCaseIdentifierName',
+  };
+  check('scanner: every rule id has a positive and a negative case', RULE_IDS.every(id => POS[id] && NEG[id]), RULE_IDS.filter(id => !POS[id] || !NEG[id]).join());
+  for (const id of RULE_IDS) {
+    check(`scanner: ${id} positive`, scanSecrets('line one\n' + POS[id]).some(f => f.rule === id), id);
+    check(`scanner: ${id} negative`, !scanSecrets(NEG[id]).some(f => f.rule === id), id + ' ' + JSON.stringify(scanSecrets(NEG[id])));
+  }
+  const fine = ['The env var is PAYMENTS_KEY and the token is read from settings.', 'git sha 3f786850e387550fdab836ed7e6dc881de23001b', 'id 123e4567-e89b-12d3-a456-426614174000',
+    'base64 of short words: aGVsbG8gd29ybGQ=', 'See https://example.com/a/very/long/path/segment-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'Ask Leo which branch has the payments migration.'];
+  check('scanner: env var names, git SHAs, UUIDs, short base64 and URLs are not findings', fine.every(t => scanSecrets(t).length === 0), fine.filter(t => scanSecrets(t).length).join(' | '));
+  const f = scanSecrets('x\n' + POS.aws_access_key)[0];
+  check('scanner: reports the line and only a 4-character preview', f.line === 2 && f.preview === 'AKIA…' && !JSON.stringify(f).includes(POS.aws_access_key));
+  check('scanner: redaction removes the whole secret', !redactSecrets('use ' + POS.github_token + ' now').includes('A1b2A1b2') && redactSecrets('use ' + POS.github_token + ' now').startsWith('use ghp_…'));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

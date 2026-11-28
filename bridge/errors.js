@@ -34,6 +34,7 @@ export const ERRORS = {
   too_many_confirms: { msg: 'You have too many requests waiting for approval in your browser.', fix: 'Finish or wait out the open ones (they expire in 10 minutes), then try again.' },
   upgrade_required: { msg: 'This relay needs a newer slopstream.', fix: 'Run: npm install -g slopstream@latest   (Claude plugin: /plugin update slopstream)' },
   // Bridge-side reasons (no relay code)
+  secret_detected: { msg: 'The message looks like it contains a secret, so it was not sent.', fix: 'Remove the secret from the message, or confirm in the pop-up if you really mean to send it.' },
   timeout: { msg: 'The relay did not answer in time.', fix: 'Check your connection, then try again. Run: slopstream doctor' },
   relay_disconnected: { msg: 'The connection to the relay dropped.', fix: 'It reconnects on its own; try again in a few seconds.' },
   unreachable: { msg: 'Could not reach the relay.', fix: 'Check your internet connection, or the relay address: slopstream doctor' },

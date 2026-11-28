@@ -101,17 +101,20 @@ export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
   async function run(req) {
     const peer = clean(req.peer || 'your friend');
     const text = shorten(req.text || '');
-    if (cmd) return runCmd(cmd, { kind: req.kind, peer, text: clean(req.text || '') }, (timeoutSec + 10) * 1000);
-    const outbound = req.kind === 'outbound';
-    const body = outbound
+    if (cmd) return runCmd(cmd, { kind: req.kind, peer, text: clean(req.text || ''), ...(req.what ? { what: clean(req.what) } : {}) }, (timeoutSec + 10) * 1000);
+    const secret = req.kind === 'secret';
+    const outbound = req.kind === 'outbound' || secret;
+    const body = secret
+      ? `Your agent wants to send what looks like ${clean(req.what || 'a secret')} to ${peer}'s agent.\n\nSend anyway?`
+      : outbound
       ? `Your agent wants to send this message to ${peer}'s agent:\n\n${text}\n\nSend it?`
       : `${peer}'s agent sent this message (untrusted text from another AI agent):\n\n${text}\n\nLet your agent see it?`;
-    const title = outbound ? 'Slopstream: approve outgoing message' : 'Slopstream: approve incoming message';
+    const title = secret ? 'Slopstream: this message may contain a secret' : outbound ? 'Slopstream: approve outgoing message' : 'Slopstream: approve incoming message';
     let r;
     if (process.platform === 'darwin') {
       const args = [];
       for (const line of DIALOG_SCRIPT(timeoutSec)) args.push('-e', line);
-      args.push(body, title, outbound ? "Don't send" : 'Decline', outbound ? 'Send' : 'Show to my agent');
+      args.push(body, title, outbound ? "Don't send" : 'Decline', secret ? 'Send anyway' : outbound ? 'Send' : 'Show to my agent');
       r = await runOsascript(args, (timeoutSec + 15) * 1000);
     } else if (process.platform === 'win32') {
       // MessageBox only offers Yes/No, so the action is spelled out in the body instead of on the buttons.
@@ -126,6 +129,14 @@ export function makeGate({ mode = 'off', cmd = '', timeoutSec = 120 } = {}) {
 
   return {
     mode,
+    // A message that looks like it holds a secret. Asked even when the gate is off (Claude Code), because the only
+    // alternative is no human at all. Where nothing can show a dialog, the answer is no.
+    confirmSecret(req) {
+      if (!cmd && process.platform !== 'darwin' && process.platform !== 'win32') return Promise.resolve({ approved: false, via: 'unavailable', reason: 'no way to ask a person here' });
+      const p = chain.then(() => run({ ...req, kind: 'secret' })).catch((e) => ({ approved: false, via: 'error', reason: String(e && e.message || e) }));
+      chain = p.then(() => {}, () => {});
+      return p;
+    },
     ask(req) {
       if (mode === 'off') return Promise.resolve({ approved: true, via: 'off' });
       const p = chain.then(() => run(req)).catch((e) => ({ approved: false, via: 'error', reason: String(e && e.message || e) }));

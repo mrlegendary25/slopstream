@@ -29,6 +29,7 @@ import { loadConfig, logLine, codexThreadFile, pausedFile } from './config.js';
 import { makeGate, notify } from './gate.js';
 import { explain, reasonCode } from './errors.js';
 import { VERSION } from './version.js';
+import { scanSecrets, redactSecrets, describeFindings } from './secret-scan.js';
 
 const cfg = loadConfig();
 const CHAT = process.env.SLOPSTREAM_CHAT || path.basename(process.cwd());
@@ -164,10 +165,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const body = String(args.text || '').trim();
     if (!body) return text('Not sent: empty message.', true);
 
+    // Secrets: scan first. A finding blocks the send; only a person, in a pop-up, can let this one message through.
+    const findings = scanSecrets(body);
+    if (findings.length) {
+      const what = describeFindings(findings);
+      const ov = await gate.confirmSecret({ peer: target.user, what });
+      if (!ov.approved) {
+        logLine({ dir: 'out', to: target.user, blocked: true, reason: 'secret_detected', rules: [...new Set(findings.map(f => f.rule))], text: redactSecrets(body) });
+        return text(`Not sent: this looks like it contains ${what}. Nothing was sent. ` + (ov.via === 'unavailable'
+          ? 'There is no way to ask your user here, so they must remove it from the message.'
+          : 'Your user was asked and said no. Remove it from the message.'), true);
+      }
+      logLine({ dir: 'out', to: target.user, note: 'secret override approved by a person', rules: [...new Set(findings.map(f => f.rule))] });
+    }
+
     // Hard human gate (pop-up). Fails closed: if it can't ask, nothing is sent.
     const verdict = await gate.ask({ kind: 'outbound', peer: target.user, text: body });
     if (!verdict.approved) {
-      logLine({ dir: 'out', to: target.user, blocked: true, reason: verdict.reason || verdict.via, text: body });
+      logLine({ dir: 'out', to: target.user, blocked: true, reason: verdict.reason || verdict.via, text: redactSecrets(body) });
       return text(`Not sent: your user did not approve this message (${verdict.reason || 'declined'}).`, true);
     }
     if (!state.connected || !state.linkId) return text('Not sent: lost the connection to the relay while waiting for approval.', true);
@@ -179,7 +194,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       acks.set(id, (a) => { clearTimeout(t); resolve(a); });
       state.ws.send(JSON.stringify({ t: 'msg', id, to: target.user, contextId, meta: { hop: 1, label: verdict.via === 'off' ? 'agent' : 'human-approved' }, parts: [{ kind: 'text', text: body }] }));
     });
-    logLine({ dir: 'out', to: target.user, id, thread: contextId, delivered: result.delivered, reason: result.reason, text: body });
+    logLine({ dir: 'out', to: target.user, id, thread: contextId, delivered: result.delivered, reason: result.reason, text: redactSecrets(body) });
     if (result.delivered) recordReceipt(id, target.user, 'delivered');
     return result.delivered
       ? text(`Delivered to ${target.user}'s agent (msg_id=${id}, thread_id=${contextId}). link_status shows whether it was shown, read or declined.`)
