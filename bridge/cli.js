@@ -249,6 +249,32 @@ async function main() {
       console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
       ws.close(); break;
     }
+    case 'block':
+    case 'unblock': {
+      const target = rest[0]; if (!target) die(`usage: slopstream ${cmd} <user>`);
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: cmd, user: target }));
+      const r = await nextMsg(ws, [cmd === 'block' ? 'blocked' : 'unblocked'], 5000);
+      console.log(cmd === 'block'
+        ? `Blocked @${r.user}. Any link you shared with them has ended, and they can't reach you or use your invites. Undo with: slopstream unblock ${r.user}`
+        : `Unblocked @${r.user}. Links that ended stay ended; link again if you want to.`);
+      ws.close(); break;
+    }
+    case 'blocks': {
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'list_blocks' }));
+      const { users } = await nextMsg(ws, ['blocks'], 5000);
+      console.log(users.length ? users.map(u => `@${u}`).join('\n') : 'You have not blocked anyone.');
+      ws.close(); break;
+    }
+    case 'report': {
+      const [target, ...why] = rest; if (!target) die('usage: slopstream report <user> [what happened]');
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'report', user: target, reason: why.join(' ') }));
+      await nextMsg(ws, ['reported'], 5000);
+      console.log(`Thanks. Your report about @${target.replace(/^@/, '')} was sent to the relay's operator. It holds your reason and how many links you share, never message text. To stop them reaching you, also run: slopstream block ${target.replace(/^@/, '')}`);
+      ws.close(); break;
+    }
     case 'links': {
       const cfg = needCfg(); const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'list_links' }));
@@ -329,6 +355,8 @@ usage: slopstream <command>
   approve <code> [--yes]             let in someone who used your invite (also later, after you closed link)
   deny <code>                        refuse such a request, or withdraw an invite nobody used
   links                              your links, and who is online in each
+  block <user> / unblock <user>      end every link with someone and stop them reaching you (blocks lists them)
+  report <user> [what happened]      tell the relay's operator about someone (never sends message text)
   unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
   pause <chat> / resume <chat>       stop / restart a chat connecting to the relay, without unlinking it
   init <chat> [--agent claude|codex] (in a project folder) re-wire this folder for Claude Code or Codex
