@@ -71,12 +71,34 @@ export function deleteSecret(cfg, home = defaultHome(), { store = makeSecretStor
   if (!cfg || !KEYCHAIN_KINDS.has(cfg.tokenStore) || store.kind !== cfg.tokenStore) return;
   try { store.del(secretAccount(cfg, home)); } catch { /* best effort */ }
 }
+// The local log is the only place message text is kept (the hosted relay stores none). It rotates past 5 MiB, and rotated
+// files are deleted after SLOPSTREAM_LOG_DAYS (default 90). Checked every 200 appends and when `rotateLogs` is called at start.
+let appends = 0;
+export function rotateLogs(home = defaultHome(), { maxBytes = 5 * 1024 * 1024, days = Number(process.env.SLOPSTREAM_LOG_DAYS) || 90, now = Date.now() } = {}) {
+  try {
+    const f = logFile(home);
+    if (fs.existsSync(f) && fs.statSync(f).size > maxBytes) {
+      const stamp = new Date(now).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
+      let dest = path.join(home, `log-${stamp}.jsonl`);
+      for (let i = 1; fs.existsSync(dest); i++) dest = path.join(home, `log-${stamp}-${i}.jsonl`);
+      fs.renameSync(f, dest);
+    }
+    for (const name of fs.readdirSync(home)) {
+      if (!/^log-.*\.jsonl$/.test(name)) continue;
+      const full = path.join(home, name);
+      if (now - fs.statSync(full).mtimeMs > days * 86400000) fs.rmSync(full, { force: true });
+    }
+  } catch { /* logging must never break the bridge */ }
+}
 export function logLine(obj, home = defaultHome()) {
   try {
     fs.mkdirSync(home, { recursive: true, mode: 0o700 });
     fs.appendFileSync(logFile(home), JSON.stringify({ ts: new Date().toISOString(), ...obj }) + '\n', { mode: 0o600 });
+    if (++appends % 200 === 0) rotateLogs(home);
   } catch { /* logging must never break the bridge */ }
 }
 
 // Where `slopstream login` goes when nothing else says otherwise. (The hosted relay.)
 export const DEFAULT_RELAY = process.env.SLOPSTREAM_RELAY || 'wss://slopstream-relay.slopstream.workers.dev';
+export const chatSettingsFile = (chat, home = defaultHome()) => path.join(home, 'chats', `${chat}.json`);
+export const activityFile = (chat, home = defaultHome()) => path.join(home, 'activity', `${chat}.json`);

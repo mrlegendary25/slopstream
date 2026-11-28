@@ -92,6 +92,7 @@ const got = await waitFor(() => A.inbox[0]);
 check('inbound pushed as channel notification in the existing session', !!got);
 check('meta.from is the sender', got?.meta?.from === 'himnish');
 check('content is framed as UNTRUSTED', /UNTRUSTED message from himnish/.test(got?.content || ''));
+check('wrapper shows the sender\'s label', /UNTRUSTED message from himnish's agent · sent by their agent/.test(got?.content || ''), got?.content);
 check('wrapper-forging characters neutralised', !/<\/channel>|<channel/.test(got?.content || ''), got?.content);
 const thread = got?.meta?.thread_id;
 const shownSeen = await waitFor(async () => JSON.parse((await H.call('link_status')).text).recentReceipts.find(x => x.status === 'shown' && x.to === 'aarush'));

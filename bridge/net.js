@@ -10,7 +10,7 @@ export function admin(cfg) {
     ws.once('error', (e) => reject(new RelayError('unreachable', `Could not reach the relay at ${cfg.relay} (${e.message}).`)));
     let hb = null;
     ws.on('open', () => {
-      ws.send(JSON.stringify({ t: 'hello', v: 3, clientVersion: VERSION, user: cfg.user, token: cfg.token }));
+      ws.send(JSON.stringify({ t: 'hello', v: 4, clientVersion: VERSION, user: cfg.user, token: cfg.token }));
       // `link` and `join` can wait a long time; keep proxies from dropping the idle socket.
       hb = setInterval(() => { try { ws.send('{"t":"ping"}'); } catch { /* closing */ } }, 25000);
       hb.unref?.();

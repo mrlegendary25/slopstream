@@ -132,6 +132,13 @@ const wd = run('alice', TMP, 'deny', urlWd.split('/j/')[1]);
 check('deny withdraws an invite nobody used', /Withdrew invite/.test(wd.out) && (await fetch(urlWd)).status === 404, wd.out);
 linkWd.p.kill('SIGKILL');
 
+// 10d. block and report
+const blk = run('bob', TMP, 'block', 'nobody-here');
+check('block works, even on a name nobody uses', /Blocked @nobody-here/.test(blk.out) && /nobody-here/.test(run('bob', TMP, 'blocks').out), blk.out);
+check('unblock works', /Unblocked/.test(run('bob', TMP, 'unblock', 'nobody-here').out) && /not blocked anyone/.test(run('bob', TMP, 'blocks').out));
+const rpt = run('bob', TMP, 'report', 'carol', 'sent me', 'odd', 'things');
+check('report is accepted and says what it holds', rpt.code === 0 && /Thanks/.test(rpt.out) && /never message text/.test(rpt.out), rpt.out);
+
 // 11. human-only guard
 const guard = spawnSync('node', [CLI, 'join', 'aaaaa-bbbbb'], { cwd: pD, env: { ...env('carol'), SLOPSTREAM_ALLOW_NONINTERACTIVE: '' }, encoding: 'utf8' });
 check('join without a TTY is refused', guard.status === 1 && /must be typed by a person/.test(guard.stderr), guard.stderr);

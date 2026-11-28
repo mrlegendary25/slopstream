@@ -14,12 +14,13 @@ import { detectAgents, chooseAgent, describeChoice } from './agents.js';
 import { runLogin, openBrowser } from './login.js';
 import { httpBase, getJson } from './http.js';
 import { runDoctor } from './doctor.js';
+import { readLog, formatEntry, parseSince, clearLogs, logFiles } from './history.js';
 import { demoUp, demoStatus, demoPeer, demoDown } from './demo.js';
 
 const args = process.argv.slice(2);
 const yes = args.includes('--yes');
 const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined; };
-const optVals = new Set(['relay', 'agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to', 'relay-data'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
+const optVals = new Set(['peer', 'since', 'relay', 'agent', 'chat', 'home', 'a', 'b', 'c', 'port', 'dir', 'side', 'linger', 'to', 'relay-data'].map(n => args.indexOf(`--${n}`)).filter(i => i >= 0).map(i => i + 1));
 const pos = args.filter((a, i) => !a.startsWith('--') && !optVals.has(i));
 const [cmd, ...rest] = pos;
 const die = (m) => { console.error(m); process.exit(1); };
@@ -249,6 +250,58 @@ async function main() {
       console.log(r.t === 'paired' ? `Linked: ${v.chat} <-> ${r.members.map(p => `${p.user}/${p.chat}`).join(', ')}` : 'Denied.');
       ws.close(); break;
     }
+    case 'history': {
+      const home = defaultHome();
+      if (args.includes('--clear')) {
+        requireHuman('history --clear');
+        const n = logFiles(home).filter(f => fs.existsSync(f)).length;
+        if (!n) { console.log('Nothing to delete: there is no local log.'); break; }
+        if (!yes && !/^yes$/i.test((await ask(`Delete ${n} local log file${n > 1 ? 's' : ''} (every message you sent or received, with its text)? Type "yes": `)).trim())) { console.log('Nothing was deleted.'); break; }
+        console.log(`Deleted ${clearLogs(home)} log file(s).`);
+        break;
+      }
+      if (args.includes('--relay')) {
+        const ws = await admin(needCfg());
+        ws.send(JSON.stringify({ t: 'my_activity', sinceDays: Math.min(30, Math.max(1, Math.round((Date.now() - (parseSince(opt('since') || '7d') || Date.now() - 7 * 86400000)) / 86400000))) }));
+        const { events } = await nextMsg(ws, ['activity'], 8000);
+        if (args.includes('--json')) console.log(JSON.stringify(events, null, 2));
+        else if (!events.length) console.log('No relay events in that period.');
+        else for (const e of events) console.log(`${e.ts}  ${e.ev}${e.peer ? `  ${e.peer}` : ''}${e.status ? `  ${e.status}` : ''}`);
+        console.log('\n(This is what the relay knows about you: events and who, never message text. Message text is only in your local history.)');
+        ws.close(); break;
+      }
+      const entries = readLog(home, { chat: rest[0], peer: opt('peer'), sinceMs: parseSince(opt('since')) });
+      if (args.includes('--json')) { console.log(JSON.stringify(entries, null, 2)); break; }
+      if (!entries.length) { console.log('No messages in the local log' + (rest[0] || opt('peer') || opt('since') ? ' for that filter.' : ' yet.')); break; }
+      for (const e of entries) console.log(formatEntry(e, { tty: !!process.stdout.isTTY }));
+      break;
+    }
+    case 'block':
+    case 'unblock': {
+      const target = rest[0]; if (!target) die(`usage: slopstream ${cmd} <user>`);
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: cmd, user: target }));
+      const r = await nextMsg(ws, [cmd === 'block' ? 'blocked' : 'unblocked'], 5000);
+      console.log(cmd === 'block'
+        ? `Blocked @${r.user}. Any link you shared with them has ended, and they can't reach you or use your invites. Undo with: slopstream unblock ${r.user}`
+        : `Unblocked @${r.user}. Links that ended stay ended; link again if you want to.`);
+      ws.close(); break;
+    }
+    case 'blocks': {
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'list_blocks' }));
+      const { users } = await nextMsg(ws, ['blocks'], 5000);
+      console.log(users.length ? users.map(u => `@${u}`).join('\n') : 'You have not blocked anyone.');
+      ws.close(); break;
+    }
+    case 'report': {
+      const [target, ...why] = rest; if (!target) die('usage: slopstream report <user> [what happened]');
+      const ws = await admin(needCfg());
+      ws.send(JSON.stringify({ t: 'report', user: target, reason: why.join(' ') }));
+      await nextMsg(ws, ['reported'], 5000);
+      console.log(`Thanks. Your report about @${target.replace(/^@/, '')} was sent to the relay's operator. It holds your reason and how many links you share, never message text. To stop them reaching you, also run: slopstream block ${target.replace(/^@/, '')}`);
+      ws.close(); break;
+    }
     case 'links': {
       const cfg = needCfg(); const ws = await admin(cfg);
       ws.send(JSON.stringify({ t: 'list_links' }));
@@ -329,6 +382,10 @@ usage: slopstream <command>
   approve <code> [--yes]             let in someone who used your invite (also later, after you closed link)
   deny <code>                        refuse such a request, or withdraw an invite nobody used
   links                              your links, and who is online in each
+  history [chat] [--peer u] [--since 7d] [--json] [--relay] [--clear]
+                                      what you sent and received (local, with text); --relay shows what the relay knows (no text)
+  block <user> / unblock <user>      end every link with someone and stop them reaching you (blocks lists them)
+  report <user> [what happened]      tell the relay's operator about someone (never sends message text)
   unlink <chat>                      leave a link; dissolves it if fewer than 2 chats would remain
   pause <chat> / resume <chat>       stop / restart a chat connecting to the relay, without unlinking it
   init <chat> [--agent claude|codex] (in a project folder) re-wire this folder for Claude Code or Codex

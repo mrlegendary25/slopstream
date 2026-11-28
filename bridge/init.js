@@ -14,6 +14,7 @@ const END = '<!-- slopstream:end -->';
 const TOML_START = '# slopstream:start';
 const TOML_END = '# slopstream:end';
 export const CLI_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cli.js');
+export const HOOK_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'hook.js');
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 
 const CLAUDE_RULES = `${START}
@@ -53,6 +54,24 @@ export function removeTomlTables(text, prefix) {
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+// Hooks go in .claude/settings.local.json: personal and gitignored by default, so absolute paths never land in a shared repo.
+// Replaces only entries that run our hook.js and keeps everything else.
+export function installClaudeHooks(cwd, chat, home = {}) {
+  const file = path.join(cwd, '.claude', 'settings.local.json');
+  let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new file */ }
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
+  const base = [shq(process.execPath), shq(HOOK_PATH)];
+  const tail = ['--chat', shq(chat), ...(home.SLOPSTREAM_HOME ? ['--home', shq(home.SLOPSTREAM_HOME)] : [])];
+  const mine = (mode) => ({ type: 'command', command: [...base, mode, ...tail].join(' ') });
+  const isOurs = (entry) => Array.isArray(entry?.hooks) && entry.hooks.some(h => String(h?.command || '').includes('bridge/hook.js') || String(h?.command || '').includes('bridge\\hook.js'));
+  cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' && !Array.isArray(cfg.hooks) ? cfg.hooks : {};
+  const put = (event, entry) => { const keep = (Array.isArray(cfg.hooks[event]) ? cfg.hooks[event] : []).filter(e => !isOurs(e)); cfg.hooks[event] = [...keep, entry]; };
+  put('UserPromptSubmit', { hooks: [mine('prompt')] });
+  put('PreToolUse', { matcher: '*', hooks: [mine('pre-tool')] });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+}
+
 function upsertBlock(file, block) {
   let md = ''; try { md = fs.readFileSync(file, 'utf8'); } catch { /* new file */ }
   const re = new RegExp(`${START}[\\s\\S]*?${END}\\n?`);
@@ -80,7 +99,8 @@ export function runInit({ chat, agent = 'claude', cwd = process.cwd(), env = pro
     mcp.mcpServers.slopstream = { command: 'node', args: [SERVER_PATH], env: { SLOPSTREAM_CHAT: chat, ...home } };
     fs.writeFileSync(mcpFile, JSON.stringify(mcp, null, 2));
     upsertBlock(path.join(cwd, 'CLAUDE.md'), CLAUDE_RULES);
-    written.push('.mcp.json', 'CLAUDE.md');
+    installClaudeHooks(cwd, chat, home);
+    written.push('.mcp.json', 'CLAUDE.md', '.claude/settings.local.json');
     return {
       agent, written, warnings,
       next: [
