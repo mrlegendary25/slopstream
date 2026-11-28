@@ -68,7 +68,7 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   try { migrate(new MemKV({ schema: 99 }), list); } catch (e) { msg = e.message; }
   check('migrate refuses data from a newer schema', /newer slopstream \(schema 99\)/.test(msg), msg);
   const fresh = new MemKV(); new RelayCore({ kv: fresh, config: configFromEnv({}) });
-  check('RelayCore on a fresh store sets schema 1', fresh.get('schema') === MIGRATIONS.length && MIGRATIONS.length === 1);
+  check('RelayCore on a fresh store sets the current schema (2)', fresh.get('schema') === MIGRATIONS.length && MIGRATIONS.length === 2);
 }
 
 // --- audit rotation ---

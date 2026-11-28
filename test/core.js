@@ -472,6 +472,124 @@ function world(env = {}, kv2 = newKv()) {
   check('per-user rate limit across two links', acks.filter(a => a.delivered).length === 5 && acks[5].reason === 'rate_limited_user', JSON.stringify(acks.map(a => a.reason || 'ok')));
 }
 
+// ---- Phase 2a T6: abuse controls ----
+{
+  const DAY = 86400000;
+  const T = Date.UTC(2026, 10, 1);
+  const kvA = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), carol: sha('tc') } });
+  const mkAcc = (n, id, createdAt, ghCreatedAt) => { kvA.put('account:' + n, { name: n, ghId: id, ghLogin: n, createdAt, ghCreatedAt }); kvA.put('gh:' + id, n); kvA.put('device:' + sha('sst_' + n), { id: 'dev-' + n, user: n, label: 'x', createdAt, lastSeenAt: T }); };
+  mkAcc('newbie', 1, T - DAY, null);              // joined yesterday
+  mkAcc('younggh', 2, T - 100 * DAY, T - 3 * DAY); // old on the relay, GitHub account 3 days old
+  mkAcc('oldie', 3, T - 100 * DAY, T - 900 * DAY);
+  const coreA = new RelayCore({ kv: kvA, config: configFromEnv({ PUBLIC_URL: 'https://r.test', IP_CONN_MAX: '3', MAX_OPEN_INVITES: '20', ADMIN_TOKEN: 'adm1n' }), now: () => T });
+  let ipn = 0;
+  const adm = (u, t) => { const c = new FakeConn(); coreA.openConn(c, { ip: '10.9.' + (ipn++) + '.1' }); coreA.onMessage(c, JSON.stringify({ t: 'hello', v: 4, user: u, token: t })); return c; };
+  const say = (c, o) => coreA.onMessage(c, JSON.stringify(o));
+  const errOf = (c) => last(c, 'error')?.code;
+
+  // IP connection limit
+  const ipConns = Array.from({ length: 5 }, () => { const c = new FakeConn(); coreA.openConn(c, { ip: '77.7.7.7' }); return c; });
+  check('IP connection limit: the 4th open in a minute from one address is closed (4029)', ipConns.slice(0, 3).every(c => !c.closed) && ipConns[3].closed?.c === 4029 && ipConns[4].closed?.c === 4029);
+  const other = new FakeConn(); coreA.openConn(other, { ip: '77.7.7.8' });
+  check('...and another address is not affected', !other.closed);
+
+  // new accounts
+  const nb = adm('newbie', 'sst_newbie');
+  for (let i = 0; i < 3; i++) say(nb, { t: 'pair_create', chat: 'n' + i });
+  check('new account: 3 open invites are fine', nb.sent.filter(m => m.t === 'pair_code').length === 3);
+  say(nb, { t: 'pair_create', chat: 'n3' });
+  check('new GitHub account gets lower invite limits (and the error says when it lifts)', errOf(nb) === 'new_account_limit' && /until 2026-11-07/.test(last(nb, 'error').message), JSON.stringify(last(nb, 'error')));
+  const yg = adm('younggh', 'sst_younggh');
+  for (let i = 0; i < 3; i++) say(yg, { t: 'pair_create', chat: 'y' + i });
+  say(yg, { t: 'pair_create', chat: 'y3' });
+  check('an old relay account on a young GitHub account is limited too', errOf(yg) === 'new_account_limit' && /until 2026-11-28/.test(last(yg, 'error').message), JSON.stringify(last(yg, 'error')));
+  const od = adm('oldie', 'sst_oldie');
+  for (let i = 0; i < 10; i++) say(od, { t: 'pair_create', chat: 'o' + i });
+  check('old account is not limited', od.sent.filter(m => m.t === 'pair_code').length === 10 && !errOf(od));
+  const nb2 = adm('newbie', 'sst_newbie');
+  for (let i = 0; i < 4; i++) say(nb2, { t: 'pair_create', chat: 'd' + i, for: 'someone' });
+  check('new account: directed invites capped (3 a day) too', errOf(nb2) === 'new_account_limit' || nb2.sent.filter(m => m.t === 'pair_code').length <= 3);
+  const legacy = adm('alice', 'ta');
+  for (let i = 0; i < 6; i++) say(legacy, { t: 'pair_create', chat: 'l' + i });
+  check('legacy (admin-token) users are never treated as new', legacy.sent.filter(m => m.t === 'pair_code').length === 6);
+
+  // pending cap
+  const mkInv = (code, owner, chat) => kvA.put('invite:' + code, { code, kind: 'pair', user: owner, chat, groupId: null, createdAt: T, exp: T + DAY, requester: null });
+  for (let i = 0; i < 6; i++) mkInv('pend' + i + 'abcde', 'carol', 'cp' + i);
+  const od2 = adm('oldie', 'sst_oldie');
+  for (let i = 0; i < 6; i++) say(od2, { t: 'pair_accept', code: 'pend' + i + 'abcde', chat: 'op' + i });
+  check('pending cap: a 6th request waiting for approval is refused (too_many_pending)', od2.sent.filter(m => m.t === 'pair_waiting').length === 5 && errOf(od2) === 'too_many_pending', JSON.stringify(od2.sent.map(m => m.t + (m.code ? ':' + m.code : ''))));
+  for (let i = 0; i < 3; i++) mkInv('newp' + i + 'abcde', 'carol', 'cq' + i);
+  const nb3 = adm('newbie', 'sst_newbie');
+  for (let i = 0; i < 3; i++) say(nb3, { t: 'pair_accept', code: 'newp' + i + 'abcde', chat: 'np' + i });
+  check('new account: only 2 requests may wait for approval', nb3.sent.filter(m => m.t === 'pair_waiting').length === 2 && errOf(nb3) === 'new_account_limit');
+
+  // block
+  const kvB = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), carol: sha('tc') } });
+  const coreB = new RelayCore({ kv: kvB, config: configFromEnv({ PUBLIC_URL: 'https://r.test', IP_CONN_MAX: '1000' }), now: () => T });
+  const ab = (u, t, chat) => { const c = new FakeConn(); coreB.openConn(c, { ip: '5.5.5.5' }); coreB.onMessage(c, JSON.stringify({ t: 'hello', v: 4, user: u, token: t, ...(chat ? { chat } : {}) })); return c; };
+  const sb = (c, o) => coreB.onMessage(c, JSON.stringify(o));
+  kvB.put('links', [{ id: 'B1', members: [{ user: 'alice', chat: 'a' }, { user: 'bob', chat: 'b' }], createdAt: 'x' }, { id: 'B2', members: [{ user: 'alice', chat: 'a2' }, { user: 'carol', chat: 'c' }], createdAt: 'x' }]);
+  coreB.links = kvB.get('links');
+  const aAdm = ab('alice', 'ta'), bAdm = ab('bob', 'tb'), cAdm = ab('carol', 'tc');
+  const bSess = ab('bob', 'tb', 'b');
+  sb(aAdm, { t: 'block', user: '@Bob' });
+  check('block dissolves shared links', last(aAdm, 'blocked')?.user === 'bob' && coreB.links.length === 1 && coreB.links[0].id === 'B2' && last(bSess, 'unlinked'));
+  check('...and leaves other links alone', coreB.links[0].members.length === 2);
+  sb(bAdm, { t: 'pair_create', chat: 'bx', for: 'alice' });
+  check('a blocked person can still make a directed invite (same reply)...', !!last(bAdm, 'pair_code'));
+  sb(aAdm, { t: 'list_requests' });
+  check('...but it never shows up for the person who blocked them', last(aAdm, 'requests').incoming.length === 0 && !last(aAdm, 'invite_for_you'));
+  const bCode = last(bAdm, 'pair_code').code;
+  sb(aAdm, { t: 'pair_accept', code: bCode, chat: 'za' });
+  check("block: my pair_accept on their invite looks like a bad code", errOf(aAdm) === 'bad_code');
+  sb(aAdm, { t: 'pair_create', chat: 'mine' }); const aCode = last(aAdm, 'pair_code').code;
+  sb(bAdm, { t: 'pair_accept', code: aCode, chat: 'zb' });
+  check("blocked user's pair_accept looks like a bad code", errOf(bAdm) === 'bad_code' && !last(bAdm, 'pair_waiting'));
+  sb(aAdm, { t: 'block', user: 'nobody-here' });
+  check('block of an unknown user succeeds', !!last(aAdm, 'blocked'));
+  sb(aAdm, { t: 'list_blocks' });
+  check('list_blocks lists them', last(aAdm, 'blocks').users.join() === 'bob,nobody-here');
+  sb(aAdm, { t: 'unblock', user: 'bob' });
+  sb(bAdm, { t: 'pair_accept', code: aCode, chat: 'zb' });
+  check('unblock restores it', !!last(bAdm, 'pair_waiting'));
+  sb(aAdm, { t: 'block', user: 'alice' });
+  check('you cannot block yourself', errOf(aAdm) === 'bad_target');
+
+  // report
+  sb(aAdm, { t: 'report', user: 'carol', reason: 'spam\u0007 ' + 'x'.repeat(800) });
+  const rep = coreB.kv.list('report:')[0]?.[1];
+  check('report stored without content: reason capped, controls stripped, shared links counted', !!last(aAdm, 'reported') && rep.by === 'alice' && rep.user === 'carol' && rep.reason.length === 500 && !/[\u0000-\u001f]/.test(rep.reason) && rep.sharedLinks === 1 && !('text' in rep));
+  sb(aAdm, { t: 'report', user: 'ghost-user', reason: 'x' });
+  check('reporting an unknown user succeeds silently and stores nothing', !!last(aAdm, 'reported') && coreB.kv.list('report:').length === 1);
+  for (let i = 0; i < 4; i++) sb(aAdm, { t: 'report', user: 'carol', reason: 'again' + i });
+  sb(aAdm, { t: 'report', user: 'carol', reason: 'one too many' });
+  check('6th report in a day is refused (too_many_reports)', errOf(aAdm) === 'too_many_reports');
+
+  // suspend
+  const cSess = ab('carol', 'tc', 'c');
+  sb(cAdm, { t: 'pair_create', chat: 'cs' }); const cCode = last(cAdm, 'pair_code').code;
+  coreB.suspend('carol', 'abuse');
+  check('suspend closes live connections (4011)', cSess.closed?.c === 4011 && cAdm.closed?.c === 4011);
+  const again = ab('carol', 'tc');
+  check("suspended user can't connect", last(again, 'error')?.code === 'suspended' && again.closed?.c === 4011 && !last(again, 'welcome'));
+  sb(bAdm, { t: 'pair_accept', code: cCode, chat: 'zc' });
+  check("a suspended user's open invites stop working", errOf(bAdm) === 'bad_code');
+  coreB.kv.del('suspended:carol');
+  check('unsuspend restores', !!last(ab('carol', 'tc'), 'welcome'));
+
+  // admin routes
+  const req = (method, path, headers = {}, body = '') => coreB.handleHttp({ method, path, headers, body, ip: '9.9.9.9' });
+  check('admin routes 404 without ADMIN_TOKEN', (await req('GET', '/v1/admin/reports', { authorization: 'Bearer x' })).status === 404);
+  const reqA = (method, path, headers = {}, body = '') => coreA.handleHttp({ method, path, headers, body, ip: '9.9.9.9' });
+  check('admin routes 401 with a wrong token', (await reqA('GET', '/v1/admin/reports', { authorization: 'Bearer nope' })).status === 401 && (await reqA('GET', '/v1/admin/reports')).status === 401);
+  const good = { authorization: 'Bearer adm1n' };
+  check('admin routes 200 with the right token', (await reqA('GET', '/v1/admin/reports', good)).status === 200);
+  const sus = await reqA('POST', '/v1/admin/suspend', good, JSON.stringify({ user: 'alice', reason: 'test' }));
+  check('POST /v1/admin/suspend suspends, unsuspend lifts', sus.status === 200 && !!kvA.get('suspended:alice') && (await reqA('POST', '/v1/admin/unsuspend', good, JSON.stringify({ user: 'alice' }))).status === 200 && !kvA.get('suspended:alice'));
+  check('admin suspend rejects a bad username', (await reqA('POST', '/v1/admin/suspend', good, JSON.stringify({ user: '../x' }))).status === 400);
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

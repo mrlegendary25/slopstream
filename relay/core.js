@@ -28,6 +28,8 @@ function validMeta(m) {
 const RECEIPT_STATUSES = ['accepted', 'declined', 'shown', 'inbox', 'read'];
 const CONFIRM_MAX_OPEN = 5;
 const MAX_DIRECTED_PER_DAY = 20;
+const MAX_PENDING = 5;
+const MAX_REPORTS_PER_DAY = 5;
 const SESSION_MS = 15 * 60 * 1000;
 const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ACCEPT_FAIL_MAX = 10;
@@ -56,6 +58,10 @@ export function configFromEnv(env) {
     maxText: num(env.MAX_TEXT, 8000),
     rateMax: num(env.RATE_MAX, 30), // msgs per link per window
     rateWindowMs: num(env.RATE_WINDOW_MS, 10 * 60 * 1000),
+    ipConnMax: num(env.IP_CONN_MAX, 30),               // websocket opens per IP per minute
+    newAccountDays: num(env.NEW_ACCOUNT_DAYS, 7),
+    ghMinAgeDays: num(env.GH_MIN_AGE_DAYS, 30),
+    adminToken: str(env.ADMIN_TOKEN, ''),
     userRateMax: num(env.USER_RATE_MAX, 60), // msgs per USER across all their links per window
     maxGroupSize: num(env.MAX_GROUP_SIZE, 3), // how many chats can share one link
     publicUrl: str(env.PUBLIC_URL, '').replace(/\/+$/, ''),
@@ -111,6 +117,7 @@ export class RelayCore {
     this.online = new Map();  // "user chat" -> conn id (session connections only)
     this.rate = new Map();    // linkId -> [timestamps]
     this.userRate = new Map(); // user -> [timestamps]
+    this.ipOpens = new Map();  // ip -> [timestamps of websocket opens]
     this.authFails = new Map();   // ip -> [timestamps of failed hellos]
     this.startsByIp = new Map();  // ip -> [timestamps of GitHub login starts]
     this.acceptFails = new Map(); // user -> [timestamps of bad pair_accept codes]
@@ -120,6 +127,12 @@ export class RelayCore {
   openConn(conn, { ip = '' } = {}) {
     conn.meta = { id: crypto.randomUUID(), openedAt: this.now(), ip, authed: false };
     conn.saveMeta();
+    if (ip) {
+      const now = this.now();
+      const opens = (this.ipOpens.get(ip) || []).filter(t => now - t < 60000);
+      opens.push(now); this.ipOpens.set(ip, opens);
+      if (opens.length > this.config.ipConnMax) return conn.close(4029, 'slow down'); // never registered, so nothing to clean up
+    }
     this.conns.set(conn.meta.id, conn);
   }
 
@@ -163,6 +176,10 @@ export class RelayCore {
     const now = this.now();
     for (const c of [...this.conns.values()]) {
       if (!c.meta.authed && now - c.meta.openedAt > 10000) c.close(4001, 'hello timeout');
+    }
+    for (const [ip, arr] of this.ipOpens) {
+      const fresh = arr.filter(t => now - t < 60000);
+      if (fresh.length) this.ipOpens.set(ip, fresh); else this.ipOpens.delete(ip);
     }
     for (const [u, arr] of this.userRate) {
       const fresh = arr.filter(t => now - t < this.config.rateWindowMs);
@@ -224,6 +241,7 @@ export class RelayCore {
     if (path.startsWith('/c/') && (method === 'GET' || method === 'POST')) return this.confirmPageRoute(req);
     if (method === 'GET' && path === '/v1/auth/github/callback') return this.githubCallback(req);
     if (method === 'GET' && path === '/v1/stats') return this.statsRoute(req);
+    if (path.startsWith('/v1/admin/')) return this.adminRoute(req);
     if (method === 'POST' && (path === '/v1/auth/github/start' || path === '/v1/auth/github/poll')) {
       let body = {};
       try { body = req.body ? JSON.parse(req.body) : {}; } catch { return json(400, { status: 'error', code: 'bad_json' }); }
@@ -298,6 +316,7 @@ export class RelayCore {
     } catch { who = null; }
     if (!who || typeof who.id !== 'number' || !who.login) { d.inFlightAt = 0; this.kv.put(key, d); return json(502, { status: 'error', code: 'github_unavailable' }); }
 
+    const ghCreated = Number.isFinite(Date.parse(who.created_at)) ? Date.parse(who.created_at) : null;
     let name = this.kv.get('gh:' + who.id);
     if (!name) {
       name = String(who.login).toLowerCase();
@@ -306,13 +325,13 @@ export class RelayCore {
         this.kv.del(key);
         return json(200, { status: 'error', code: 'name_taken', message: 'that username is already used on this relay' });
       }
-      this.kv.put('account:' + name, { name, ghId: who.id, ghLogin: who.login, createdAt: now });
+      this.kv.put('account:' + name, { name, ghId: who.id, ghLogin: who.login, createdAt: now, ghCreatedAt: ghCreated });
       this.kv.put('gh:' + who.id, name);
       this.bump('accounts');
     } else {
       // The relay username never changes after creation (links reference it), even if the person renames on GitHub.
       const acc = this.kv.get('account:' + name);
-      if (acc) { acc.ghLogin = who.login; this.kv.put('account:' + name, acc); }
+      if (acc) { acc.ghLogin = who.login; if (ghCreated) acc.ghCreatedAt = ghCreated; this.kv.put('account:' + name, acc); }
     }
     const mine = this.kv.list('device:').filter(([, dv]) => dv.user === name);
     if (mine.length >= c.maxDevices) {
@@ -444,6 +463,32 @@ export class RelayCore {
   }
 
   // Off unless STATS_TOKEN is set. A wrong token counts against the same per-IP limiter as a wrong login.
+  // Operator routes (suspend, unsuspend, reports). Off (404) unless ADMIN_TOKEN is set. Same constant-time compare and per-IP limiter as /v1/stats.
+  adminRoute(req) {
+    const want = this.config.adminToken;
+    if (!want) return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
+    const now = this.now(), ip = req.ip || '';
+    const fails = (this.authFails.get(ip) || []).filter(t => now - t < AUTH_FAIL_WINDOW_MS);
+    this.authFails.set(ip, fails);
+    if (ip && fails.length >= AUTH_FAIL_MAX) return json(429, { status: 'error', code: 'rate_limited' });
+    const given = /^Bearer (.+)$/.exec((req.headers || {}).authorization || '')?.[1] || '';
+    const a = crypto.createHash('sha256').update(given).digest(), b = crypto.createHash('sha256').update(want).digest();
+    if (!crypto.timingSafeEqual(a, b)) { fails.push(now); return json(401, { status: 'error', code: 'auth' }); }
+    const { method, path } = req;
+    if (method === 'GET' && path === '/v1/admin/reports') {
+      const reports = this.kv.list('report:').map(([, r]) => r).sort((x, y) => y.at - x.at).slice(0, 200);
+      return json(200, { reports });
+    }
+    if (method === 'POST' && (path === '/v1/admin/suspend' || path === '/v1/admin/unsuspend')) {
+      let body = {}; try { body = JSON.parse(req.body || '{}'); } catch { return json(400, { status: 'error', code: 'bad_json' }); }
+      const user = String(body.user || '');
+      if (!NAME_RE.test(user)) return json(400, { status: 'error', code: 'bad_target' });
+      if (path.endsWith('/suspend')) this.suspend(user, body.reason || ''); else { this.kv.del('suspended:' + user); this.audit({ ev: 'unsuspended', user }); }
+      return json(200, { status: 'ok' });
+    }
+    return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
+  }
+
   statsRoute(req) {
     const want = this.config.statsToken;
     if (!want) return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'not found' };
@@ -520,6 +565,7 @@ export class RelayCore {
     const inv = c ? this.kv.get('invite:' + c) : undefined;
     if (!inv) return undefined;
     if (inv.exp < this.now()) { this.kv.del('invite:' + c); return undefined; }
+    if (this.kv.get('suspended:' + inv.user)) return undefined; // a suspended person's invites stop working
     return inv;
   }
   userInvites(user) { return this.kv.list('invite:').map(([, v]) => v).filter(v => v.user === user && v.exp >= this.now()); }
@@ -529,10 +575,17 @@ export class RelayCore {
   makeInvite(conn, chat, groupId, forUser = null) {
     const user = conn.meta.user;
     const { maxOpenInvites, inviteTtlMs, publicUrl } = this.config;
-    if (this.userInvites(user).length >= maxOpenInvites) { conn.send({ t: 'error', code: 'too_many_invites', message: `you already have ${maxOpenInvites} open invites; cancel some first` }); return; }
+    const nl = this.newAccountLimits(user);
+    const openCap = nl ? Math.min(nl.invites, maxOpenInvites) : maxOpenInvites;
+    if (this.userInvites(user).length >= openCap) {
+      if (nl && openCap === nl.invites) conn.send({ t: 'error', code: 'new_account_limit', message: `new accounts can have at most ${nl.invites} open invites until ${nl.until}` });
+      else conn.send({ t: 'error', code: 'too_many_invites', message: `you already have ${maxOpenInvites} open invites; cancel some first` });
+      return;
+    }
     let dayKey = null;
     if (forUser) {
       dayKey = `dirinv:${user}:${new Date(this.now()).toISOString().slice(0, 10)}`;
+      if (nl && (this.kv.get(dayKey) || 0) >= nl.directed) { conn.send({ t: 'error', code: 'new_account_limit', message: `new accounts can send at most ${nl.directed} invites to named people a day, until ${nl.until}` }); return; }
       if ((this.kv.get(dayKey) || 0) >= MAX_DIRECTED_PER_DAY) { conn.send({ t: 'error', code: 'too_many_directed', message: `you can send at most ${MAX_DIRECTED_PER_DAY} invites to named people per day` }); return; }
     }
     const code = this.newCode();
@@ -544,7 +597,7 @@ export class RelayCore {
     const url = `${publicUrl}/j/${displayCode(code)}`;
     conn.send({ t: 'pair_code', code: displayCode(code), url, expiresInSec: inviteTtlMs / 1000 });
     // If the named person has a terminal open, they see it at once. Same reply to the sender either way.
-    if (forUser) for (const c of [...this.conns.values()]) if (c.meta.authed && c.meta.mode === 'admin' && c.meta.user.toLowerCase() === forUser) c.send(this.incomingOf(inv));
+    if (forUser) for (const c of [...this.conns.values()]) if (c.meta.authed && c.meta.mode === 'admin' && c.meta.user.toLowerCase() === forUser && !this.isBlocked(c.meta.user, user)) c.send(this.incomingOf(inv));
     return inv;
   }
   incomingOf(inv) {
@@ -613,6 +666,7 @@ export class RelayCore {
       if (!ok) return fail();
       meta.user = user;
     }
+    if (this.kv.get('suspended:' + meta.user)) { this.audit({ ev: 'suspended_hello', user: meta.user }); conn.send({ t: 'error', code: 'suspended', message: 'this account is suspended' }); return conn.close(4011, 'suspended'); }
     meta.authed = true;
     // Which kind of agent is behind this session (claude, codex, console...). Informational only.
     meta.agent = /^[a-z0-9_-]{1,20}$/.test(String(m.agent || '')) ? String(m.agent) : 'unknown';
@@ -652,6 +706,50 @@ export class RelayCore {
     if (conn.meta.mode === 'session') return this.handleSession(conn, m);
   }
 
+  // ---- abuse controls ----
+  // A GitHub account is "new" for NEW_ACCOUNT_DAYS after it joined the relay, or while the GitHub account itself is younger than
+  // GH_MIN_AGE_DAYS. New accounts get lower limits. Legacy (admin-token) users and accounts with an unknown GitHub age are never limited.
+  newAccountLimits(user) {
+    const acc = this.kv.get('account:' + user);
+    if (!acc) return null;
+    const now = this.now(), c = this.config;
+    const ends = [];
+    if (now - acc.createdAt < c.newAccountDays * 86400000) ends.push(acc.createdAt + c.newAccountDays * 86400000);
+    if (acc.ghCreatedAt && now - acc.ghCreatedAt < c.ghMinAgeDays * 86400000) ends.push(acc.ghCreatedAt + c.ghMinAgeDays * 86400000);
+    if (!ends.length) return null;
+    return { invites: 3, directed: 3, links: 5, pending: 2, until: new Date(Math.max(...ends)).toISOString().slice(0, 10) };
+  }
+  blocksOf(user) { return this.kv.get('block:' + user) || []; }
+  isBlocked(a, b) { return this.blocksOf(a).includes(String(b).toLowerCase()) || this.blocksOf(b).includes(String(a).toLowerCase()); }
+
+  // Leave one chat's link: a two-person link dissolves for both; a group keeps going for the rest. Returns false if there was no such link.
+  leaveLink(user, chat) {
+    const link = this.findLink(user, chat);
+    if (!link) return false;
+    const remaining = link.members.filter(x => !(x.user === user && x.chat === chat));
+    if (remaining.length < 2) {
+      this.links = this.links.filter(l => l.id !== link.id); this.saveLinks();
+      for (const side of link.members) {
+        const w = this.connOf(side.user, side.chat);
+        if (w) { w.send({ t: 'unlinked' }); w.close(4007, 'unlinked'); }
+      }
+      this.audit({ ev: 'unlinked', linkId: link.id, by: user });
+    } else {
+      link.members = remaining; this.saveLinks();
+      const w = this.connOf(user, chat); // the leaver's own SESSION, if any (this admin connection is separate)
+      if (w) { w.send({ t: 'unlinked' }); w.close(4007, 'unlinked'); }
+      this.broadcastMembers(link);
+      this.audit({ ev: 'left_group', linkId: link.id, by: user });
+    }
+    return true;
+  }
+
+  suspend(user, reason = '') {
+    this.kv.put('suspended:' + user, { at: this.now(), reason: String(reason).slice(0, 200) });
+    this.audit({ ev: 'suspended', user });
+    for (const c of [...this.conns.values()]) if (c.meta.user === user) { c.send({ t: 'error', code: 'suspended', message: 'this account is suspended' }); c.close(4011, 'suspended'); }
+  }
+
   // null: not directed. false: invalid (or yourself). Otherwise the lower-cased username. Usernames are stored lower-case.
   targetOf(conn, m) {
     if (m.for === undefined || m.for === null || m.for === '') return null;
@@ -674,10 +772,15 @@ export class RelayCore {
     if (fails.length >= ACCEPT_FAIL_MAX) return bad('too_many_attempts', 'too many wrong codes; try again in a few minutes');
     const inv = this.getInvite(code);
     if (!inv) { fails.push(now); return bad('bad_code', 'unknown or expired code'); }
+    if (this.isBlocked(user, inv.user)) { fails.push(now); return bad('bad_code', 'unknown or expired code'); } // exactly like a code that doesn't exist
     if (inv.user === user) return bad('same_user', 'cannot pair with yourself');
     if (inv.forUser && inv.forUser !== user.toLowerCase()) { fails.push(now); return bad('not_for_you', 'this invite is for someone else'); }
     if (this.findLink(user, chat)) return bad('already_linked', `chat "${chat}" is already linked`);
     if (inv.requester) return bad('busy', 'code already in use');
+    const pending = this.kv.list('invite:').filter(([, v]) => v.requester && v.requester.user === user && v.exp >= now).length;
+    const nl = this.newAccountLimits(user);
+    if (nl && pending >= nl.pending) return bad('new_account_limit', `new accounts can have at most ${nl.pending} requests waiting for approval, until ${nl.until}`);
+    if (pending >= MAX_PENDING) return bad('too_many_pending', `you already have ${MAX_PENDING} requests waiting for approval`);
     if (inv.groupId) {
       const group = this.links.find(l => l.id === inv.groupId);
       if (!group) return bad('gone', 'that group no longer exists');
@@ -718,6 +821,7 @@ export class RelayCore {
     const countLinks = (u) => this.links.filter(l => l.members.some(x => x.user === u)).length;
     const limited = inv.groupId ? [req.user] : [inv.user, req.user];
     if (limited.some(u => countLinks(u) >= this.config.maxLinks)) return fail('too_many_links', 'a user is at the maximum number of links');
+    for (const u of limited) { const nl2 = this.newAccountLimits(u); if (nl2 && countLinks(u) >= nl2.links) return fail('new_account_limit', `new accounts can have at most ${nl2.links} links, until ${nl2.until}`); }
     let link;
     if (inv.groupId) {
       link = this.links.find(l => l.id === inv.groupId);
@@ -807,7 +911,7 @@ export class RelayCore {
           requester: v.requester ? { user: v.requester.user, chat: v.requester.chat, github: this.githubOf(v.requester.user) } : null,
         }));
         const incoming = this.kv.list('invite:').map(([, v]) => v)
-          .filter(v => v.forUser === user.toLowerCase() && !v.requester && v.exp >= this.now())
+          .filter(v => v.forUser === user.toLowerCase() && !v.requester && v.exp >= this.now() && !this.isBlocked(user, v.user))
           .map(v => { const { t, ...rest } = this.incomingOf(v); return rest; });
         return conn.send({ t: 'requests', invites, incoming });
       }
@@ -823,26 +927,50 @@ export class RelayCore {
           .map(l => ({ id: l.id, createdAt: l.createdAt, members: l.members.map(x => ({ ...x, online: this.online.has(key(x.user, x.chat)) })) }));
         return conn.send({ t: 'links', links: mine });
       }
+      case 'block': {
+        // Stops a person from reaching you or being reachable by you: shared links end, and their invites and requests look like nothing.
+        // Blocking a name nobody uses succeeds just the same, so it can't be used to find out who is here.
+        const target = String(m.user || '').replace(/^@/, '').toLowerCase();
+        if (!NAME_RE.test(target) || target === user.toLowerCase()) return err('bad_target', 'that is not a valid username');
+        const list = this.blocksOf(user);
+        if (!list.includes(target)) { if (list.length >= 200) return err('too_many_blocks', 'you have blocked too many people'); list.push(target); this.kv.put('block:' + user, list); }
+        for (const link of [...this.links]) {
+          if (!link.members.some(x => x.user === user) || !link.members.some(x => x.user.toLowerCase() === target)) continue;
+          for (const mine of link.members.filter(x => x.user === user)) this.leaveLink(user, mine.chat);
+        }
+        this.audit({ ev: 'block', user });
+        return conn.send({ t: 'blocked', user: target });
+      }
+      case 'unblock': {
+        const target = String(m.user || '').replace(/^@/, '').toLowerCase();
+        const list = this.blocksOf(user).filter(x => x !== target);
+        if (list.length) this.kv.put('block:' + user, list); else this.kv.del('block:' + user);
+        return conn.send({ t: 'unblocked', user: target });
+      }
+      case 'list_blocks': return conn.send({ t: 'blocks', users: this.blocksOf(user) });
+      case 'report': {
+        const target = String(m.user || '').replace(/^@/, '').toLowerCase();
+        if (!NAME_RE.test(target)) return err('bad_target', 'that is not a valid username');
+        const day = new Date(this.now()).toISOString().slice(0, 10);
+        const ck = `repcount:${user}:${day}`;
+        const n = this.kv.get(ck) || 0;
+        if (n >= MAX_REPORTS_PER_DAY) return err('too_many_reports', `you can file at most ${MAX_REPORTS_PER_DAY} reports a day`);
+        this.kv.put(ck, n + 1);
+        // A name nobody uses is accepted and dropped, so reporting can't be used to find out who is here. Never stores message content.
+        const known = this.kv.get('gh:' + target) || this.kv.get('account:' + target) || Object.keys(this.kv.get('users') || {}).some(u => u.toLowerCase() === target);
+        if (known) {
+          const id = crypto.randomBytes(8).toString('hex');
+          const reason = String(m.reason || '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 500);
+          const shared = this.links.filter(l => l.members.some(x => x.user === user) && l.members.some(x => x.user.toLowerCase() === target)).length;
+          this.kv.put('report:' + id, { id, by: user, user: target, reason, at: this.now(), sharedLinks: shared });
+          this.audit({ ev: 'report', by: user, user: target });
+        }
+        return conn.send({ t: 'reported' });
+      }
       case 'unlink': {
         // Leaving a group: if fewer than 2 chats would remain, the whole link is dissolved for everyone.
         const chat = String(m.chat || '');
-        const link = this.findLink(user, chat);
-        if (!link) return err('not_linked', 'no such link');
-        const remaining = link.members.filter(x => !(x.user === user && x.chat === chat));
-        if (remaining.length < 2) {
-          this.links = this.links.filter(l => l.id !== link.id); this.saveLinks();
-          for (const side of link.members) {
-            const w = this.connOf(side.user, side.chat);
-            if (w) { w.send({ t: 'unlinked' }); w.close(4007, 'unlinked'); }
-          }
-          this.audit({ ev: 'unlinked', linkId: link.id, by: user });
-        } else {
-          link.members = remaining; this.saveLinks();
-          const w = this.connOf(user, chat); // the leaver's own SESSION, if any (this admin connection is separate)
-          if (w) { w.send({ t: 'unlinked' }); w.close(4007, 'unlinked'); }
-          this.broadcastMembers(link);
-          this.audit({ ev: 'left_group', linkId: link.id, by: user });
-        }
+        if (!this.leaveLink(user, chat)) return err('not_linked', 'no such link');
         return conn.send({ t: 'unlinked_ok', chat });
       }
     }
