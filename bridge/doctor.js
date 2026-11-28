@@ -120,6 +120,14 @@ export async function collectChecks({ cwd = process.cwd(), chat: chatOpt, env = 
     add('session', null, mine.me.online ? "this chat's agent session is online" : `this chat's agent session is not running. Start it with: ${folder?.agent === 'codex' ? 'codex' : START_CLAUDE}`);
   }
 
+  // the tool guard hooks (Claude folders)
+  if (folder?.agent === 'claude') {
+    let hooks = null; try { hooks = JSON.parse(read(path.join(cwd, '.claude', 'settings.local.json')) || '{}').hooks || null; } catch { /* unreadable */ }
+    const has = (ev) => (hooks?.[ev] || []).some(e => (e.hooks || []).some(h => String(h.command || '').includes('hook.js')));
+    if (has('PreToolUse') && has('UserPromptSubmit')) add('hooks', true, 'the tool guard and prompt hooks are installed');
+    else add('hooks', false, "the tool guard hooks are not installed in this folder, so a peer's message isn't stopped from leading to a tool call", `slopstream init ${chat || '<chat>'}`);
+  } else add('hooks', null, folder ? 'no hooks for Codex (its own approval pop-up covers this)' : 'skipped');
+
   // 15-16. agent
   if (folder?.agent === 'claude') {
     const c = ver(binFor('claude', env));

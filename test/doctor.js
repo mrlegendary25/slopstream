@@ -40,7 +40,7 @@ const ok = cli(folder, homeA, 'doctor');
 check('healthy wired folder: all checks pass, exit 0', ok.code === 0 && !/✗/.test(ok.out) && /All good/.test(ok.out), ok.out);
 const js = cli(folder, homeA, 'doctor', '--json');
 let arr = null; try { arr = JSON.parse(js.stdout); } catch { /* checked below */ }
-const IDS = ['node', 'version', 'login', 'token', 'relay', 'protocol', 'auth', 'folder', 'rules', 'chat', 'paused', 'linked', 'peers', 'session', 'claude', 'codex'];
+const IDS = ['node', 'version', 'login', 'token', 'relay', 'protocol', 'auth', 'folder', 'rules', 'chat', 'paused', 'linked', 'peers', 'session', 'hooks', 'claude', 'codex'];
 check('--json is valid JSON with an id per check', Array.isArray(arr) && IDS.every(id => find(arr, id)) && arr.every(c => 'id' in c && 'ok' in c && c.msg), js.stdout.slice(0, 200));
 check('linked check names the peer', /doc-b\/doc/.test(find(arr, 'linked')?.msg || ''));
 check('peers and session are informational (null), not failures', find(arr, 'peers')?.ok === null && find(arr, 'session')?.ok === null && /Start it with/.test(find(arr, 'session').msg));
@@ -59,6 +59,12 @@ cli(folder, homeA, 'pause', 'doc');
 const paused = cli(folder, homeA, 'doctor');
 check('paused chat: paused ✗ suggests resume', paused.code === 1 && /✗ chat "doc" is paused/.test(paused.out) && /→ slopstream resume doc/.test(paused.out), paused.out);
 cli(folder, homeA, 'resume', 'doc');
+
+// hooks missing
+fs.rmSync(path.join(folder, '.claude'), { recursive: true, force: true });
+const nohooks = cli(folder, homeA, 'doctor');
+check('hooks missing: hooks ✗ suggests init', nohooks.code === 1 && /✗ the tool guard hooks are not installed/.test(nohooks.out) && /→ slopstream init doc/.test(nohooks.out), nohooks.out);
+cli(folder, homeA, 'init', 'doc', '--agent', 'claude');
 
 // not linked
 const other = dir('otherfolder'); cli(other, homeA, 'init', 'lonely', '--agent', 'claude');
