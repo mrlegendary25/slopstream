@@ -25,7 +25,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'node:fs';
-import { loadConfig, logLine, codexThreadFile, pausedFile } from './config.js';
+import { loadConfig, logLine as rawLog, rotateLogs, codexThreadFile, pausedFile } from './config.js';
 import { makeGate, notify } from './gate.js';
 import { explain, reasonCode } from './errors.js';
 import { VERSION } from './version.js';
@@ -37,6 +37,8 @@ import { scanSecrets, redactSecrets, describeFindings } from './secret-scan.js';
 
 const cfg = loadConfig();
 const CHAT = process.env.SLOPSTREAM_CHAT || path.basename(process.cwd());
+const logLine = (o) => rawLog({ chat: CHAT, ...o }); // every line says which chat it belongs to, so `slopstream history <chat>` can filter
+rotateLogs();
 const AGENT = (process.env.SLOPSTREAM_AGENT || 'claude').toLowerCase();
 const PUSH = AGENT === 'claude';
 const START_TS = Date.now(); // true: Claude Code channel push; false: inbox mode

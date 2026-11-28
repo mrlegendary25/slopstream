@@ -927,6 +927,18 @@ export class RelayCore {
           .map(l => ({ id: l.id, createdAt: l.createdAt, members: l.members.map(x => ({ ...x, online: this.online.has(key(x.user, x.chat)) })) }));
         return conn.send({ t: 'links', links: mine });
       }
+      case 'my_activity': {
+        // Your own events from the audit log, so you can see what the relay knows about you. Projected to a fixed few fields:
+        // never message text (even where the operator logs it), and never another person's device ids or labels.
+        const days = Math.min(30, Math.max(1, Math.floor(Number(m.sinceDays) || 7)));
+        const mine = (e) => [e.user, e.from, e.to, e.by].includes(user);
+        const events = this.kv.readAudit(this.now() - days * 86400000, mine, 500).map(e => ({
+          ts: e.ts, ev: e.ev, ...(e.linkId ? { linkId: e.linkId } : {}),
+          ...((e.from === user ? e.to : e.from) ? { peer: e.from === user ? e.to : e.from } : (e.added?.user ? { peer: e.added.user } : {})),
+          ...(e.status ? { status: e.status } : {}),
+        }));
+        return conn.send({ t: 'activity', events });
+      }
       case 'block': {
         // Stops a person from reaching you or being reachable by you: shared links end, and their invites and requests look like nothing.
         // Blocking a name nobody uses succeeds just the same, so it can't be used to find out who is here.

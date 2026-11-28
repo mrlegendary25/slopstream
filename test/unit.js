@@ -354,5 +354,51 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   check('sanitize turns CRLF and lone CR into newlines', sanitize('a\r\nb\rc') === 'a\nb\nc');
 }
 
+// --- FileKV.readAudit across rotated files ---
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-ra-'));
+  const kv = new FileKV(d, { auditMaxBytes: 200 });
+  const t0 = Date.now() - 5000;
+  for (let i = 0; i < 120; i++) kv.appendAudit({ ts: new Date(t0 + i).toISOString(), ev: 'x', n: i, user: i % 2 ? 'a' : 'b', pad: 'y'.repeat(20) });
+  const got = kv.readAudit(0, (e) => e.user === 'a', 10);
+  check('FileKV.readAudit: newest first, filtered, across rotated files', got.length === 10 && got[0].n === 119 && got.every(e => e.user === 'a') && fs.readdirSync(d).some(f => /^audit-/.test(f)));
+  check('FileKV.readAudit: honours the time bound and the limit', kv.readAudit(t0 + 100, () => true, 1000).length === 20 && kv.readAudit(0, () => true, 3).length === 3);
+  fs.rmSync(d, { recursive: true, force: true });
+}
+
+// --- local history and log rotation ---
+{
+  const { readLog, formatEntry, parseSince, clearLogs } = await import('../bridge/history.js');
+  const { rotateLogs, logLine } = await import('../bridge/config.js');
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-hist-'));
+  const now = Date.UTC(2026, 10, 20, 12, 0, 0), day = 86400000;
+  const L = (o) => JSON.stringify(o) + '\n';
+  fs.writeFileSync(path.join(h, 'log-20261001T000000.jsonl'), L({ ts: new Date(now - 40 * day).toISOString(), dir: 'out', to: 'bob', chat: 'web', text: 'old one', delivered: true }));
+  fs.writeFileSync(path.join(h, 'log.jsonl'),
+    L({ ts: new Date(now - 3 * day).toISOString(), dir: 'out', to: 'bob', chat: 'web', label: 'agent', text: 'hello bob', delivered: true })
+    + L({ ts: new Date(now - 2 * day).toISOString(), dir: 'in', from: 'carl', chat: 'web', text: 'hi from carl' })
+    + L({ ts: new Date(now - 1 * day).toISOString(), dir: 'out', to: 'bob', chat: 'api', blocked: true, reason: 'secret_detected', text: 'blocked text' })
+    + L({ ts: new Date(now).toISOString(), dir: 'receipt', from: 'bob', status: 'read' }) + 'not json\n');
+  const all = readLog(h);
+  check('history reads rotated and current logs, oldest first, skipping receipts and junk', all.length === 4 && all[0].text === 'old one' && all[3].text === 'blocked text');
+  check('history filters by peer', readLog(h, { peer: 'carl' }).length === 1 && readLog(h, { peer: 'bob' }).length === 3);
+  check('history filters by chat', readLog(h, { chat: 'api' }).length === 1);
+  check('history filters by since', readLog(h, { sinceMs: parseSince('7d', now) }).length === 3 && readLog(h, { sinceMs: parseSince('36h', now) }).length === 1);
+  check('parseSince: bad input means no filter', parseSince('soon') === 0 && parseSince('2w', now) === now - 14 * day);
+  check('formatEntry: a TTY truncates long text to 200 characters', formatEntry({ ts: new Date(now).toISOString(), dir: 'out', to: 'bob', text: 'x'.repeat(500), delivered: true }, { tty: true }).split('\n')[1].length <= 4 + 201 && formatEntry({ ts: new Date(now).toISOString(), dir: 'out', to: 'bob', text: 'x'.repeat(500) }, { tty: false }).includes('x'.repeat(500)));
+  check('formatEntry says blocked, declined and delivered in words', /not sent \(secret_detected\)/.test(formatEntry(all[3])) && /received/.test(formatEntry(all[2])) && /delivered/.test(formatEntry(all[1])));
+
+  // rotation: injected size and clock
+  fs.writeFileSync(path.join(h, 'log.jsonl'), 'x'.repeat(300));
+  rotateLogs(h, { maxBytes: 200, days: 90, now });
+  const names = fs.readdirSync(h);
+  check('log rotation: past the limit the log is renamed with a timestamp', !names.includes('log.jsonl') && names.some(n => /^log-20261120T120000\.jsonl$/.test(n)), names.join());
+  const ancient = path.join(h, 'log-20261001T000000.jsonl'); const t = new Date(now - 100 * day); fs.utimesSync(ancient, t, t);
+  rotateLogs(h, { maxBytes: 1e9, days: 90, now });
+  check('log retention: rotated logs older than the retention days are deleted', !fs.existsSync(ancient) && fs.existsSync(path.join(h, 'log-20261120T120000.jsonl')));
+  check('history --clear helper deletes every local log', clearLogs(h) >= 1 && readLog(h).length === 0);
+  fs.rmSync(h, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -43,6 +43,23 @@ export class FileKV {
     fs.appendFileSync(this.auditFile, JSON.stringify(o) + '\n');
     if (++this.appends % 100 === 0) this.rotateAudit();
   }
+  readAudit(sinceMs, match, limit) {
+    const files = [this.auditFile];
+    try { files.push(...fs.readdirSync(this.dir).filter(f => /^audit-.*\.jsonl$/.test(f)).sort().reverse().map(f => path.join(this.dir, f))); } catch { /* none */ }
+    const out = [];
+    for (const f of files) {                       // current file first, then rotated ones, newest first
+      let raw = ''; try { raw = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      const lines = raw.split('\n');
+      for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+        if (!lines[i]) continue;
+        let e; try { e = JSON.parse(lines[i]); } catch { continue; }
+        if (Date.parse(e.ts) < sinceMs) return out; // everything earlier is older still
+        if (match(e)) out.push(e);
+      }
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
   // Past the size limit the live file is renamed to audit-<UTC time>.jsonl and a new one starts.
   rotateAudit() {
     try {

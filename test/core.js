@@ -590,6 +590,32 @@ function world(env = {}, kv2 = newKv()) {
   check('admin suspend rejects a bad username', (await reqA('POST', '/v1/admin/suspend', good, JSON.stringify({ user: '../x' }))).status === 400);
 }
 
+// ---- Phase 2a T7: my_activity ----
+{
+  const kvH = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), carl: sha('tc') } });
+  const coreH = new RelayCore({ kv: kvH, config: configFromEnv({ AUDIT_TEXT: '1', IP_CONN_MAX: '1000' }), now: () => clock });
+  const day = 86400000;
+  const put = (o, ago = 0) => kvH.appendAudit({ ts: new Date(clock - ago).toISOString(), ...o });
+  put({ ev: 'msg', from: 'alice', to: 'bob', linkId: 'L1', id: 'm1', text: 'SECRET-TEXT-1' });
+  put({ ev: 'msg', from: 'bob', to: 'alice', linkId: 'L1', id: 'm2', text: 'SECRET-TEXT-2' });
+  put({ ev: 'msg', from: 'bob', to: 'carl', linkId: 'L2', id: 'm3', text: 'not about alice' });
+  put({ ev: 'receipt', from: 'bob', to: 'alice', status: 'read', linkId: 'L1', deviceId: 'dev-bob-secret' });
+  put({ ev: 'paired', by: 'alice', linkId: 'L3', added: { user: 'carl', chat: 'x' } });
+  put({ ev: 'login', user: 'alice', deviceId: 'my-device' });
+  put({ ev: 'msg', from: 'alice', to: 'bob', linkId: 'L1', id: 'old', text: 'ancient' }, 40 * day);
+  const c = new FakeConn(); coreH.openConn(c, { ip: '4.4.4.4' }); coreH.onMessage(c, JSON.stringify({ t: 'hello', v: 4, user: 'alice', token: 'ta' }));
+  coreH.onMessage(c, JSON.stringify({ t: 'my_activity', sinceDays: 30 }));
+  const ev = last(c, 'activity').events;
+  const flat = JSON.stringify(ev);
+  check('my_activity returns only my events', ev.length === 5 && !/not about alice/.test(flat) && ev.every(e => e.ts && e.ev));
+  check('my_activity never returns text or device ids, even when the operator logs text', !/SECRET-TEXT|dev-bob|my-device|ancient/.test(flat) && ev.every(e => Object.keys(e).every(k => ['ts', 'ev', 'linkId', 'peer', 'status'].includes(k))), flat);
+  check('my_activity names the other person and the receipt status', ev.some(e => e.ev === 'receipt' && e.peer === 'bob' && e.status === 'read') && ev.some(e => e.ev === 'paired' && e.peer === 'carl'));
+  coreH.onMessage(c, JSON.stringify({ t: 'my_activity', sinceDays: 99999 }));
+  check('my_activity caps the period at 30 days', !/ancient/.test(JSON.stringify(last(c, 'activity').events)) && last(c, 'activity').events.length === 5);
+  coreH.onMessage(c, JSON.stringify({ t: 'my_activity', sinceDays: 1 }));
+  check('my_activity respects a shorter period', last(c, 'activity').events.length === 5);
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

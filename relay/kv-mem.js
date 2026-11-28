@@ -6,4 +6,6 @@ export class MemKV {
   del(k) { this.m.delete(k); }
   list(p) { return [...this.m].filter(([k]) => k.startsWith(p)).map(([k, v]) => [k, structuredClone(v)]); }
   appendAudit(o) { this.audit.push(o); }
+  // Newest first. `match(entry)` picks which entries; `sinceMs` and `limit` bound the scan.
+  readAudit(sinceMs, match, limit) { return [...this.audit].reverse().filter(e => Date.parse(e.ts) >= sinceMs && match(e)).slice(0, limit); }
 }
