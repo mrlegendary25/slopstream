@@ -459,6 +459,19 @@ function world(env = {}, kv2 = newKv()) {
   check('audit records the label but not the hop', kvm.audit.find(r => r.id === 'm1').label === 'agent' && !('hop' in kvm.audit.find(r => r.id === 'm1')));
 }
 
+// ---- Phase 2a T3: per-user rate limit ----
+{
+  const kvu = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), carl: sha('tc') } });
+  const coreu = new RelayCore({ kv: kvu, config: configFromEnv({ RATE_MAX: '100', USER_RATE_MAX: '5' }), now: () => clock });
+  kvu.put('links', [{ id: 'U1', members: [{ user: 'alice', chat: 'x' }, { user: 'bob', chat: 'b' }], createdAt: 'x' }, { id: 'U2', members: [{ user: 'alice', chat: 'y' }, { user: 'carl', chat: 'c' }], createdAt: 'x' }]);
+  coreu.links = kvu.get('links');
+  const su = (u, t, chat) => { const c = new FakeConn(); coreu.openConn(c, { ip: '3.4.5.6' }); coreu.onMessage(c, JSON.stringify({ t: 'hello', v: 4, user: u, token: t, chat })); return c; };
+  const ax = su('alice', 'ta', 'x'), ay = su('alice', 'ta', 'y'); su('bob', 'tb', 'b'); su('carl', 'tc', 'c');
+  let acks = [];
+  for (let i = 0; i < 8; i++) { const c = i % 2 ? ay : ax; coreu.onMessage(c, JSON.stringify({ t: 'msg', id: 'u' + i, parts: [{ kind: 'text', text: 'hi' }] })); acks.push(last(c, 'ack')); }
+  check('per-user rate limit across two links', acks.filter(a => a.delivered).length === 5 && acks[5].reason === 'rate_limited_user', JSON.stringify(acks.map(a => a.reason || 'ok')));
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };

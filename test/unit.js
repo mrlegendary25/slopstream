@@ -281,5 +281,32 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   check('scanner: redaction removes the whole secret', !redactSecrets('use ' + POS.github_token + ' now').includes('A1b2A1b2') && redactSecrets('use ' + POS.github_token + ' now').startsWith('use ghp_…'));
 }
 
+// --- turn count and hop ---
+{
+  const { turnCount, nextHop, IDLE_RESET_MS } = await import('../bridge/activity.js');
+  const now = 10_000_000, m = 60_000;
+  const cases = [
+    ['no messages', { sentAt: [], now }, 0],
+    ['three recent messages', { sentAt: [now - 3 * m, now - 2 * m, now - m], now }, 3],
+    ['a person acted after the first two', { sentAt: [now - 5 * m, now - 4 * m, now - m], lastHumanAt: now - 3 * m, now }, 1],
+    ['a person acted after all of them', { sentAt: [now - 5 * m, now - m], lastHumanAt: now - 30_000, now }, 0],
+    ['idle for 30 minutes resets (no activity file)', { sentAt: [now - 100 * m, now - 99 * m, now - 98 * m], now }, 0],
+    ['a long gap in the middle ends the run', { sentAt: [now - 100 * m, now - 99 * m, now - 2 * m, now - m], now }, 2],
+    ['exactly the idle limit counts as idle', { sentAt: [now - IDLE_RESET_MS], now }, 0],
+  ];
+  for (const [name, input, want] of cases) check(`turnCount: ${name}`, turnCount(input) === want, `${turnCount(input)} != ${want}`);
+  check('nextHop: first message is hop 1', nextHop({}) === 1);
+  check('nextHop: answering an inbound with no human in between is its hop + 1', nextHop({ inboundHop: 3, inboundAt: 500, lastHumanAt: 100 }) === 4);
+  check('nextHop: a person acting after the inbound starts over at 1', nextHop({ inboundHop: 6, inboundAt: 500, lastHumanAt: 600 }) === 1);
+  check('nextHop: capped at 1000', nextHop({ inboundHop: 1000, inboundAt: 5, lastHumanAt: 0 }) === 1000);
+  const { readActivity, writeActivity } = await import('../bridge/activity.js');
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-act-'));
+  writeActivity('c1', { lastInboundAt: 5 }, h); writeActivity('c1', { lastPromptAt: 7, lastHumanAt: 7 }, h);
+  check('activity file: writes merge', JSON.stringify(readActivity('c1', h)) === JSON.stringify({ lastPromptAt: 7, lastHumanAt: 7, lastInboundAt: 5 }));
+  fs.writeFileSync(path.join(h, 'activity', 'c1.json'), 'garbage');
+  check('activity file: damaged means no information', Object.keys(readActivity('c1', h)).length === 0 && Object.keys(readActivity('../x', h)).length === 0);
+  fs.rmSync(h, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

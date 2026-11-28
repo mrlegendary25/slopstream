@@ -56,6 +56,7 @@ export function configFromEnv(env) {
     maxText: num(env.MAX_TEXT, 8000),
     rateMax: num(env.RATE_MAX, 30), // msgs per link per window
     rateWindowMs: num(env.RATE_WINDOW_MS, 10 * 60 * 1000),
+    userRateMax: num(env.USER_RATE_MAX, 60), // msgs per USER across all their links per window
     maxGroupSize: num(env.MAX_GROUP_SIZE, 3), // how many chats can share one link
     publicUrl: str(env.PUBLIC_URL, '').replace(/\/+$/, ''),
     inviteTtlMs: num(env.INVITE_TTL_MS, 24 * 60 * 60 * 1000),
@@ -109,6 +110,7 @@ export class RelayCore {
     this.conns = new Map();   // conn id -> conn
     this.online = new Map();  // "user chat" -> conn id (session connections only)
     this.rate = new Map();    // linkId -> [timestamps]
+    this.userRate = new Map(); // user -> [timestamps]
     this.authFails = new Map();   // ip -> [timestamps of failed hellos]
     this.startsByIp = new Map();  // ip -> [timestamps of GitHub login starts]
     this.acceptFails = new Map(); // user -> [timestamps of bad pair_accept codes]
@@ -161,6 +163,10 @@ export class RelayCore {
     const now = this.now();
     for (const c of [...this.conns.values()]) {
       if (!c.meta.authed && now - c.meta.openedAt > 10000) c.close(4001, 'hello timeout');
+    }
+    for (const [u, arr] of this.userRate) {
+      const fresh = arr.filter(t => now - t < this.config.rateWindowMs);
+      if (fresh.length) this.userRate.set(u, fresh); else this.userRate.delete(u);
     }
     for (const [id, arr] of this.rate) {
       const fresh = arr.filter(t => now - t < this.config.rateWindowMs);
@@ -562,6 +568,13 @@ export class RelayCore {
       if (w) w.send({ t: 'members', members: this.otherMembers(link, m.user, m.chat) });
     }
   }
+  // One person's total across every link, so many links can't multiply the per-link allowance.
+  userRateOk(user) {
+    const now = this.now();
+    const arr = (this.userRate.get(user) || []).filter(t => now - t < this.config.rateWindowMs);
+    if (arr.length >= this.config.userRateMax) { this.userRate.set(user, arr); return false; }
+    arr.push(now); this.userRate.set(user, arr); return true;
+  }
   rateOk(linkId) {
     const now = this.now();
     const arr = (this.rate.get(linkId) || []).filter(t => now - t < this.config.rateWindowMs);
@@ -860,6 +873,7 @@ export class RelayCore {
     if (!text) return nack('empty_or_non_text');
     if (text.length > this.config.maxText) return nack(`too_long (max ${this.config.maxText} chars)`);
     if (!this.rateOk(link.id)) { this.audit({ ev: 'rate_limited', user, linkId: link.id }); return nack('rate_limited'); }
+    if (!this.userRateOk(user)) { this.audit({ ev: 'rate_limited_user', user }); return nack('rate_limited_user'); }
 
     const others = this.otherMembers(link, user, chat);
     let target;

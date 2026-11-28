@@ -19,6 +19,7 @@ export const ERRORS = {
   not_found: { msg: 'The relay could not find that.', fix: 'Check the name with: slopstream devices   or   slopstream requests' },
   internal: { msg: 'The relay hit an unexpected error.', fix: 'Try again in a moment. If it keeps happening, run: slopstream doctor' },
   rate_limited: { msg: 'You are sending too fast.', fix: 'Wait a few seconds, then try again.' },
+  rate_limited_user: { msg: 'You are sending too many messages across all your links.', fix: 'Wait a few minutes, then try again.' },
   peer_offline: { msg: 'The other person is offline right now. Nothing was queued.', fix: 'Try again when they are online (link_status shows who is).' },
   ambiguous_target: { msg: 'This group has more than one other person, so the relay does not know who you mean.', fix: 'Name the recipient with the "to" field.' },
   unknown_recipient: { msg: 'That person is not in this link.', fix: 'Check who is linked: link_status (agent) or slopstream links.' },
