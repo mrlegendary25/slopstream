@@ -92,7 +92,7 @@ const linksOf = async (n) => { const c = raw(n); await c.ready(); c.send({ t: 'l
 // ---- logins ----
 for (const n of ['alice', 'bob', 'carol']) check(`${n} logs in`, (await login(n)).code === 0);
 const info = await (await fetch(`${HTTP}/v1/info`)).json();
-check('/v1/info reports confirmLinks true and protocol 3', info.confirmLinks === true && info.protocol === 3, JSON.stringify(info));
+check('/v1/info reports confirmLinks true and protocol 4', info.confirmLinks === true && info.protocol === 4, JSON.stringify(info));
 
 // ---- 1-2. the real CLI flow: link + join, one browser click each ----
 const pA = proj('A'), pB = proj('B');

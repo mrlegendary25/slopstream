@@ -12,10 +12,19 @@ import { migrate } from './migrations.js';
 import crypto from 'node:crypto';
 import { invitePage, gonePage, landingPage, confirmPage, messagePage } from './html.js';
 
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no i, l, o, 0, 1: hard to misread
 const ZOMBIE_MS = 75000;
 const AUTH_FAIL_MAX = 20;
+// `meta` on a message: { hop, label }. Anything else (wrong type, extra keys, too big) is dropped and the message still goes through.
+const META_LABELS = ['auto', 'agent', 'human-approved'];
+function validMeta(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const keys = Object.keys(m);
+  if (keys.length !== 2 || !keys.includes('hop') || !keys.includes('label')) return null;
+  if (!Number.isInteger(m.hop) || m.hop < 0 || m.hop > 1000 || !META_LABELS.includes(m.label)) return null;
+  return JSON.stringify(m).length <= 512 ? { hop: m.hop, label: m.label } : null;
+}
 const RECEIPT_STATUSES = ['accepted', 'declined', 'shown', 'inbox', 'read'];
 const CONFIRM_MAX_OPEN = 5;
 const MAX_DIRECTED_PER_DAY = 20;
@@ -192,7 +201,7 @@ export class RelayCore {
     if (method === 'GET' && path === '/healthz') return json(200, { ok: true, protocol: PROTOCOL });
     if (method === 'GET' && path === '/v1/info') {
       const c = this.config;
-      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, confirmLinks: this.confirmEnabled(), publicUrl: c.publicUrl, minClientVersion: c.minClientVersion, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
+      return json(200, { protocol: PROTOCOL, github: !!c.githubClientId, confirmLinks: this.confirmEnabled(), requireE2E: false, publicUrl: c.publicUrl, minClientVersion: c.minClientVersion, maxGroupSize: c.maxGroupSize, inviteTtlSec: c.inviteTtlMs / 1000 });
     }
     if (method === 'GET' && path.startsWith('/v1/invite/')) {
       const inv = this.getInvite(decodeURIComponent(path.slice('/v1/invite/'.length)));
@@ -861,8 +870,10 @@ export class RelayCore {
     const pw = this.connOf(target.user, target.chat);
     if (!pw) { this.bump('undelivered'); this.audit({ ev: 'undelivered_offline', from: user, to: target.user, linkId: link.id }); return nack('peer_offline'); }
     const out = { t: 'msg', id: m.id, from: user, fromChat: chat, fromAgent: conn.meta.agent, contextId: String(m.contextId || m.id), parts: [{ kind: 'text', text }] };
+    const meta = validMeta(m.meta);
+    if (meta && pw.meta.v >= 4) out.meta = meta; // older bridges never see it
     pw.send(out);
-    this.audit({ ev: 'msg', linkId: link.id, from: user, to: target.user, id: m.id, contextId: out.contextId, text });
+    this.audit({ ev: 'msg', linkId: link.id, from: user, to: target.user, id: m.id, contextId: out.contextId, text, ...(meta ? { label: meta.label } : {}) });
     conn.send({ t: 'ack', id: m.id, delivered: true, to: target.user });
     this.bump('msgs'); this.markActive(link.id);
     // Activation: a GitHub account's first delivered message, sent within 24 h of signing up.

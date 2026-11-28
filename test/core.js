@@ -159,7 +159,7 @@ function world(env = {}, kv2 = newKv()) {
 
   const w = mk();
   const info = await get(w, '/v1/info');
-  check('/v1/info with client id', info.j.github === true && info.j.publicUrl === 'https://r.test' && info.j.protocol === 3 && info.j.minClientVersion === '');
+  check('/v1/info with client id', info.j.github === true && info.j.publicUrl === 'https://r.test' && info.j.protocol === 4 && info.j.minClientVersion === '');
   check('/v1/info without client id', (await get(mk({ GITHUB_CLIENT_ID: '' }), '/v1/info')).j.github === false);
   check('start without client id -> 404', (await post(mk({ GITHUB_CLIENT_ID: '' }), '/v1/auth/github/start', {})).status === 404);
 
@@ -179,7 +179,7 @@ function world(env = {}, kv2 = newKv()) {
   check('device label sanitized', w.kv.list('device:')[0][1].label === 'my laptop');
   check('no GitHub token stored anywhere', !JSON.stringify([...w.kv.m]).includes('gho-x'));
   const s1 = helloOn(w, 'dana', ok1.token);
-  check('device token authenticates a hello', last(s1, 'welcome')?.user === 'dana' && last(s1, 'welcome')?.protocol === 3);
+  check('device token authenticates a hello', last(s1, 'welcome')?.user === 'dana' && last(s1, 'welcome')?.protocol === 4);
   const s1b = helloOn(w, '', ok1.token);
   check('device token works without a user field', last(s1b, 'welcome')?.user === 'dana');
   const mismatch = helloOn(w, 'alice', ok1.token);
@@ -437,6 +437,28 @@ function world(env = {}, kv2 = newKv()) {
   check('...including the ancient one', !kv10.get('stats:2026-05-20'));
 }
 
+// ---- Phase 2a T1: message meta ----
+{
+  const kvm = new MemKV({ users: { alice: sha('ta'), bob: sha('tb'), carl: sha('tc') } });
+  const corem = new RelayCore({ kv: kvm, config: configFromEnv({}), now: () => clock });
+  kvm.put('links', [{ id: 'M1', members: [{ user: 'alice', chat: 'web' }, { user: 'bob', chat: 'api' }], createdAt: 'x' }, { id: 'M2', members: [{ user: 'alice', chat: 'w2' }, { user: 'carl', chat: 'c' }], createdAt: 'x' }]);
+  corem.links = kvm.get('links');
+  const sm = (u, t, chat, v) => { const c = new FakeConn(); corem.openConn(c, { ip: '1.2.3.4' }); corem.onMessage(c, JSON.stringify({ t: 'hello', v, user: u, token: t, chat })); return c; };
+  const a = sm('alice', 'ta', 'web', 4), a2 = sm('alice', 'ta', 'w2', 4), b = sm('bob', 'tb', 'api', 4), cv3 = sm('carl', 'tc', 'c', 3);
+  const send = (c, id, meta) => corem.onMessage(c, JSON.stringify({ t: 'msg', id, parts: [{ kind: 'text', text: 'hi' }], ...(meta === undefined ? {} : { meta }) }));
+  send(a, 'm1', { hop: 2, label: 'agent' });
+  check('meta is forwarded to v4 recipients', last(b, 'msg')?.meta?.hop === 2 && last(b, 'msg')?.meta?.label === 'agent');
+  send(a2, 'm2', { hop: 2, label: 'agent' });
+  check('meta is not forwarded to v3 recipients', last(cv3, 'msg') && !('meta' in last(cv3, 'msg')));
+  for (const [i, bad] of [{ hop: 1, label: 'robot' }, { hop: 1.5, label: 'agent' }, { hop: -1, label: 'agent' }, { hop: 1, label: 'agent', extra: 1 }, 'str', [1], { hop: 1 }].entries()) {
+    send(a, 'bad' + i, bad);
+    check(`invalid meta is dropped, message still delivered (${i})`, last(b, 'msg')?.id === 'bad' + i && !('meta' in last(b, 'msg')));
+  }
+  send(a, 'big', { hop: 1, label: 'agent', pad: 'x'.repeat(600) });
+  check('oversized meta is dropped', last(b, 'msg')?.id === 'big' && !('meta' in last(b, 'msg')));
+  check('audit records the label but not the hop', kvm.audit.find(r => r.id === 'm1').label === 'agent' && !('hop' in kvm.audit.find(r => r.id === 'm1')));
+}
+
 // ---- T2: client version gate ----
 {
   const mkv = (env) => { const k = new MemKV({ users: { alice: sha('ta') } }); const c2 = new RelayCore({ kv: k, config: configFromEnv({ ...env }), now: () => clock }); return { c2, k }; };
@@ -451,7 +473,7 @@ function world(env = {}, kv2 = newKv()) {
   check('hello without clientVersion is allowed when no minimum is set', last(hi(free.c2, {}), 'welcome')?.mode === 'admin');
   const infoOf = async (c2) => JSON.parse((await c2.handleHttp({ method: 'GET', path: '/v1/info', body: '', ip: '' })).body);
   const gi = await infoOf(g.c2);
-  check('/v1/info reports protocol 3 and minClientVersion', gi.protocol === 3 && gi.minClientVersion === '0.3.0');
+  check('/v1/info reports protocol 4, minClientVersion and requireE2E', gi.protocol === 4 && gi.minClientVersion === '0.3.0' && gi.requireE2E === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

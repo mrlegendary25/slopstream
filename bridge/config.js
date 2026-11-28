@@ -80,3 +80,4 @@ export function logLine(obj, home = defaultHome()) {
 
 // Where `slopstream login` goes when nothing else says otherwise. (The hosted relay.)
 export const DEFAULT_RELAY = process.env.SLOPSTREAM_RELAY || 'wss://slopstream-relay.slopstream.workers.dev';
+export const chatSettingsFile = (chat, home = defaultHome()) => path.join(home, 'chats', `${chat}.json`);

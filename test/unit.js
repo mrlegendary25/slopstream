@@ -221,5 +221,23 @@ check('VERSION is read from package.json', VERSION === JSON.parse(fs.readFileSyn
   fs.rmSync(d, { recursive: true, force: true });
 }
 
+// --- chat settings ---
+{
+  const { loadChatSettings, saveChatSettings, DEFAULT_SETTINGS } = await import('../bridge/chat-settings.js');
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-chatset-'));
+  const d = loadChatSettings('web', h);
+  check('chat settings: defaults when there is no file', d.guard === true && d.maxTurns === 4 && Object.keys(d.peers).length === 0);
+  saveChatSettings('web', { guard: false, maxTurns: 7, peers: { bob: { mode: 'x' } } }, h);
+  const m = loadChatSettings('web', h);
+  check('chat settings: saved values are merged over the defaults', m.guard === false && m.maxTurns === 7 && m.peers.bob.mode === 'x' && m.v === 1);
+  fs.writeFileSync(path.join(h, 'chats', 'web.json'), JSON.stringify({ guard: 'yes', maxTurns: -3, peers: [1] }));
+  const bad = loadChatSettings('web', h);
+  check('chat settings: invalid values fall back to defaults', bad.guard === true && bad.maxTurns === 4 && Object.keys(bad.peers).length === 0);
+  fs.writeFileSync(path.join(h, 'chats', 'web.json'), '{not json');
+  check('chat settings: a damaged file never throws', loadChatSettings('web', h).maxTurns === DEFAULT_SETTINGS.maxTurns);
+  check('chat settings: a path-like chat label is refused', loadChatSettings('../evil', h).maxTurns === 4);
+  fs.rmSync(h, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
